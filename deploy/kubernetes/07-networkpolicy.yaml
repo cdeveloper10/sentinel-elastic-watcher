@@ -1,0 +1,112 @@
+# What these pods may talk to.
+#
+# Worth the trouble here more than in most namespaces. The engine holds decrypted credentials for
+# Elasticsearch, for a gateway that can block traffic, and for an SMS provider — and it makes outbound
+# requests to addresses somebody typed into a web form. The platform checks those addresses itself
+# (OutboundAddressPolicy, with a second check after DNS resolution), but a NetworkPolicy is the check that
+# does not depend on the platform being correct.
+#
+# Requires a CNI that enforces NetworkPolicy — Calico, Cilium, or similar. On a cluster without one these
+# apply cleanly and do nothing, which is worth knowing before relying on them.
+#
+# Every address below is an example. Replace them with the estate's own.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sentinel-default-deny
+  namespace: sentinel
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  # Nothing in, nothing out. Everything below opens one hole at a time.
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sentinel-dns
+  namespace: sentinel
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    # Names have to resolve before anything else can work — including the SSRF check, which resolves a
+    # hostname and then decides whether its addresses are permitted.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sentinel-api-ingress
+  namespace: sentinel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sentinel
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    # Only the ingress controller reaches the console. Adjust the namespace label to match the estate's.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8080
+          protocol: TCP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sentinel-egress
+  namespace: sentinel
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    # The platform's own database.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: databases
+      ports:
+        - port: 5432
+          protocol: TCP
+
+    # Elasticsearch, and the services actions call. Narrow this to the specific addresses in use: the
+    # whole point is that a connection endpoint somebody types into the console cannot send the
+    # platform's credentials somewhere nobody approved.
+    - to:
+        - ipBlock:
+            cidr: 192.168.2.0/24
+      ports:
+        - port: 9200
+          protocol: TCP
+
+    - to:
+        - ipBlock:
+            cidr: 192.168.0.0/16
+            except:
+              # The cluster's own pod and service ranges, and the metadata service. A rule pointed at
+              # 169.254.169.254 is the classic way to turn a connection form into cloud credentials;
+              # the platform refuses it and so does this.
+              - 169.254.169.254/32
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 80
+          protocol: TCP

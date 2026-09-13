@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The control plane: the REST API and the console served from wwwroot. No engine, so nothing here
+    evaluates a rule — several of these can run against one engine.
+  -->
+
+  <ItemGroup>
+    <!--
+      Design-time only: the EF tools need it on the startup project to build a model, and PrivateAssets
+      keeps it out of the published output where a scaffolding library has no business being.
+    -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sentinel.Domain\Sentinel.Domain.csproj" />
+    <ProjectReference Include="..\Sentinel.Application\Sentinel.Application.csproj" />
+    <ProjectReference Include="..\Sentinel.Infrastructure\Sentinel.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

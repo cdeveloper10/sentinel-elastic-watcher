@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Adapters: Elasticsearch over HTTP, PostgreSQL through EF Core, the action providers, and composition.
+    This is the only layer that names a concrete technology; everything above it holds interfaces.
+  -->
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+
+    <!-- The session key ring lives in the platform's own database. Without it every API replica signs
+         cookies with its own keys, and a session survives only as long as the load balancer keeps sending
+         that person to the same pod. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sentinel.Domain\Sentinel.Domain.csproj" />
+    <ProjectReference Include="..\Sentinel.Application\Sentinel.Application.csproj" />
+  </ItemGroup>
+
+</Project>

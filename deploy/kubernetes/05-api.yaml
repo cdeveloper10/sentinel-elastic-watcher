@@ -1,0 +1,159 @@
+# The console and the REST API.
+#
+# Scales on how many people are reading, which has nothing to do with how large the estate being watched
+# is — so it runs several replicas while the engine runs on its own schedule. Sessions survive that
+# because the data-protection key ring lives in the database rather than on each pod: without it, two
+# replicas sign cookies with different keys and everyone is signed out whenever the load balancer sends
+# them to the other pod.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-api
+  namespace: sentinel
+  labels:
+    app.kubernetes.io/name: sentinel
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sentinel
+      app.kubernetes.io/component: api
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sentinel
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: sentinel
+      automountServiceAccountToken: false
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 64198
+        runAsGroup: 64198
+        fsGroup: 64198
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Spread across nodes where possible. Two replicas on one node is one node away from no console.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: sentinel
+              app.kubernetes.io/component: api
+
+      containers:
+        - name: api
+          image: sentinel/api:1.0.0
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          envFrom:
+            - configMapRef:
+                name: sentinel
+
+          env:
+            - name: ConnectionStrings__Sentinel
+              valueFrom:
+                secretKeyRef:
+                  name: sentinel
+                  key: ConnectionStrings__Sentinel
+            - name: Secrets__Key
+              valueFrom:
+                secretKeyRef:
+                  name: sentinel
+                  key: Secrets__Key
+
+          # Alive: the process is answering. Deliberately does not touch the database — a database blip
+          # would otherwise restart every pod, which is the last thing that helps.
+          livenessProbe:
+            httpGet: { path: /health/live, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # Ready: it can reach the database. A pod that cannot is taken out of the Service rather than
+          # serving errors.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # Gives the first start room to seed roles and the first administrator without the liveness
+          # probe deciding it has hung.
+          startupProbe:
+            httpGet: { path: /health/live, port: http }
+            periodSeconds: 5
+            failureThreshold: 24
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 768Mi }
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+      terminationGracePeriodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentinel-api
+  namespace: sentinel
+  labels:
+    app.kubernetes.io/name: sentinel
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: sentinel
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sentinel-api
+  namespace: sentinel
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sentinel
+      app.kubernetes.io/component: api

@@ -1,0 +1,428 @@
+/* ==========================================================================
+   Sentinel console
+
+   A security console is read under pressure, so the palette is spent on
+   meaning rather than decoration: severity and status carry colour, and
+   nothing else does. Neutrals are cool-biased against the teal accent so the
+   greys read as chosen rather than defaulted.
+   ========================================================================== */
+
+:root {
+  --ground:      #f4f6f8;
+  --surface:     #ffffff;
+  --surface-2:   #eef2f5;
+  --surface-3:   #e3e9ee;
+
+  --ink:         #14181d;
+  --ink-soft:    #39424e;
+  --muted:       #67717e;
+  --subtle:      #949fac;
+
+  --line:        #d9e0e6;
+  --line-soft:   #e8edf1;
+
+  --accent:      #0e6a73;
+  --accent-hover:#0a545c;
+  --accent-wash: #e2f0f1;
+
+  --crit:        #a72a1f;
+  --crit-wash:   #fbe9e7;
+  --high:        #93590a;
+  --high-wash:   #faf0dc;
+  --med:         #2c5a93;
+  --med-wash:    #e7eff8;
+  --low:         #4a5568;
+  --low-wash:    #eef1f4;
+  --good:        #226b45;
+  --good-wash:   #e3f1e9;
+
+  --radius: 6px;
+  --mono: "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground:    #0e1216;
+    --surface:   #161c22;
+    --surface-2: #1d242b;
+    --surface-3: #253038;
+
+    --ink:       #e6edf2;
+    --ink-soft:  #b6c2cd;
+    --muted:     #8492a0;
+    --subtle:    #6b7885;
+
+    --line:      #2a343d;
+    --line-soft: #222b33;
+
+    --accent:    #4fb3bc;
+    --accent-hover: #7fcbd2;
+    --accent-wash: #14313a;
+
+    --crit:      #f08a7e;  --crit-wash: #2e1714;
+    --high:      #e0b25c;  --high-wash: #2b2211;
+    --med:       #86b4e4;  --med-wash:  #14202e;
+    --low:       #9aa7b4;  --low-wash:  #1d242b;
+    --good:      #6fc496;  --good-wash: #12241a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 15px/1.55 "Vazirmatn", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { margin: 0; letter-spacing: -0.011em; line-height: 1.25; }
+a { color: var(--accent); }
+
+/* -- shell ---------------------------------------------------------------- */
+
+.shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  padding: 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.brand {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 17px; font-weight: 700; letter-spacing: -0.02em;
+  padding: 0 10px; margin-bottom: 4px;
+}
+
+.brand::before {
+  content: ""; width: 22px; height: 22px; border-radius: 6px; flex: none;
+  background: linear-gradient(135deg, var(--accent), #3b82f6);
+}
+
+.brand-sub { font-size: 12px; color: var(--muted); padding: 0 10px 18px 41px; margin-top: -4px; }
+
+.nav-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px; border-radius: var(--radius);
+  color: var(--ink-soft); text-decoration: none;
+  font-size: 14px; font-weight: 500;
+  border: none; background: none; width: 100%; text-align: left;
+  font-family: inherit; cursor: pointer;
+}
+
+.nav-item:hover { background: var(--surface-2); color: var(--ink); }
+.nav-item.active { background: var(--accent-wash); color: var(--accent); font-weight: 600; }
+.nav-item .count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.nav-section {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--subtle); padding: 16px 10px 5px;
+}
+
+.sidebar-foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.who { font-size: 13px; padding: 0 10px 8px; }
+.who strong { display: block; }
+.who span { color: var(--muted); font-size: 12px; }
+
+main { padding: 24px 28px 60px; min-width: 0; }
+
+/* -- page header ---------------------------------------------------------- */
+
+.page-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 20px;
+}
+
+.page-head h1 { font-size: 22px; font-weight: 700; }
+.page-head p { margin: 5px 0 0; color: var(--muted); font-size: 14px; max-width: 70ch; }
+
+/* -- cards and tables ----------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 18px;
+}
+
+.card + .card { margin-top: 14px; }
+.card h3 { font-size: 15px; margin-bottom: 10px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.tile .n { font-size: 26px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .k { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.tile.warn .n { color: var(--crit); }
+.tile.ok .n { color: var(--good); }
+
+.scroller { overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+
+th {
+  text-align: left; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+  padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+
+td { padding: 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr.clickable { cursor: pointer; }
+tbody tr.clickable:hover { background: var(--surface-2); }
+
+.empty { padding: 34px 12px; text-align: center; color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.muted { color: var(--muted); }
+.nowrap { white-space: nowrap; }
+
+/* -- pills ---------------------------------------------------------------- */
+
+.pill {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.sev-CRITICAL { background: var(--crit-wash); color: var(--crit); }
+.sev-HIGH     { background: var(--high-wash); color: var(--high); }
+.sev-MEDIUM   { background: var(--med-wash);  color: var(--med); }
+.sev-LOW      { background: var(--low-wash);  color: var(--low); }
+
+.st-DETECTED      { background: var(--crit-wash); color: var(--crit); }
+.st-ACKNOWLEDGED  { background: var(--high-wash); color: var(--high); }
+.st-RESOLVED      { background: var(--good-wash); color: var(--good); }
+.st-SUCCESS       { background: var(--good-wash); color: var(--good); }
+.st-FAILED,
+.st-DEAD_LETTER   { background: var(--crit-wash); color: var(--crit); }
+.st-SKIPPED       { background: var(--low-wash);  color: var(--low); }
+.st-RUNNING,
+.st-RETRYING,
+.st-PENDING       { background: var(--med-wash);  color: var(--med); }
+
+.pill.on  { background: var(--good-wash); color: var(--good); }
+.pill.off { background: var(--low-wash);  color: var(--low); }
+
+/* -- controls ------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 13px; border-radius: var(--radius);
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) { background: var(--surface-2); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn.danger { color: var(--crit); border-color: var(--crit); }
+.btn.small { padding: 4px 9px; font-size: 12.5px; }
+
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.spread { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-soft); margin-bottom: 5px; }
+
+input, select, textarea {
+  width: 100%; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 14px;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+textarea { font-family: var(--mono); font-size: 13px; min-height: 90px; resize: vertical; }
+
+.field { margin-bottom: 14px; }
+.field .hint { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+.field .err { font-size: 12.5px; color: var(--crit); margin-top: 4px; }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0 14px; }
+
+fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 0 0 14px; }
+legend { font-size: 13px; font-weight: 700; padding: 0 6px; }
+
+/* -- notices -------------------------------------------------------------- */
+
+.notice {
+  padding: 11px 14px; border-radius: var(--radius); margin-bottom: 14px;
+  border: 1px solid; border-left-width: 3px; font-size: 14px;
+}
+
+.notice.err  { background: var(--crit-wash); border-color: var(--crit); color: var(--crit); }
+.notice.ok   { background: var(--good-wash); border-color: var(--good); color: var(--good); }
+.notice.info { background: var(--med-wash);  border-color: var(--med);  color: var(--med); }
+.notice.warn { background: var(--high-wash); border-color: var(--high); color: var(--high); }
+
+/* -- sign in -------------------------------------------------------------- */
+
+.signin { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+.signin-card { width: min(400px, 100%); }
+.signin-card .brand { font-size: 20px; margin-bottom: 2px; }
+.signin-card .brand-sub { padding-left: 43px; margin-bottom: 20px; }
+
+/* -- drawer --------------------------------------------------------------- */
+
+.drawer-back {
+  position: fixed; inset: 0; background: rgba(10, 14, 18, 0.45);
+  display: flex; justify-content: flex-end; z-index: 50;
+}
+
+.drawer {
+  background: var(--ground); width: min(760px, 100%); height: 100%;
+  overflow-y: auto; padding: 22px 24px 60px;
+  border-left: 1px solid var(--line);
+}
+
+.drawer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 18px; }
+
+pre {
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 11px 13px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px;
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+}
+
+.kv { display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 6px 16px; font-size: 14px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.chip {
+  font-size: 12px; padding: 3px 8px; border-radius: var(--radius);
+  background: var(--surface-2); border: 1px solid var(--line);
+  font-family: var(--mono); cursor: pointer;
+}
+
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+
+.spinner {
+  display: inline-block; width: 13px; height: 13px;
+  border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; }
+  .sidebar-foot { width: 100%; margin-top: 8px; }
+  main { padding: 16px; }
+}
+
+/* ==========================================================================
+   The condition builder, its preview, and the template gallery.
+
+   Rows rather than a text area because the query box was the last place in
+   this console where an author had to know a syntax to get anything done.
+   ========================================================================== */
+
+.tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+
+.tabs button {
+  font: inherit; font-size: 13px; padding: 5px 12px; cursor: pointer;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius);
+  color: var(--muted);
+}
+
+.tabs button.on { background: var(--surface); border-color: var(--line); color: var(--ink); font-weight: 600; }
+.tabs button:hover:not(.on) { color: var(--ink); }
+
+.cond-row {
+  display: grid; grid-template-columns: minmax(150px, 1.4fr) minmax(110px, 0.8fr) minmax(120px, 1.2fr) auto;
+  gap: 8px; align-items: start; margin-bottom: 8px;
+}
+
+.cond-row.two-values { grid-template-columns: minmax(150px, 1.4fr) minmax(110px, 0.8fr) 1fr 1fr auto; }
+.cond-row.no-value { grid-template-columns: minmax(150px, 1.4fr) minmax(110px, 0.8fr) auto; }
+
+.cond-row input, .cond-row select { margin: 0; }
+.cond-row .drop { color: var(--muted); padding: 6px 9px; }
+.cond-row .drop:hover { color: var(--crit); border-color: var(--crit); }
+
+.cond-warn { grid-column: 1 / -1; font-size: 12px; color: var(--high); margin: -2px 0 4px; }
+
+.query-out {
+  font-family: var(--mono); font-size: 12px; background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px;
+  white-space: pre-wrap; word-break: break-all; color: var(--ink-soft); margin-top: 4px;
+}
+
+.query-out.bad { border-color: var(--crit); color: var(--crit); background: var(--crit-wash); }
+
+.sample-doc { display: grid; gap: 2px; }
+
+.sample-line {
+  display: grid; grid-template-columns: minmax(120px, 0.5fr) 1fr auto;
+  gap: 10px; align-items: baseline; padding: 3px 4px; border-radius: var(--radius);
+  font-size: 12.5px;
+}
+
+.sample-line:hover { background: var(--surface-2); }
+.sample-line .p { font-family: var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.sample-line .v { font-family: var(--mono); overflow-wrap: anywhere; }
+.sample-line .acts { display: flex; gap: 4px; opacity: 0; }
+.sample-line:hover .acts, .sample-line:focus-within .acts { opacity: 1; }
+
+.template-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+
+.template-card {
+  text-align: left; font: inherit; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
+}
+
+.template-card:hover { border-color: var(--accent); }
+.template-card strong { display: block; font-size: 14.5px; margin-bottom: 4px; }
+.template-card .sum { font-size: 13px; color: var(--ink-soft); }
+.template-card .why { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+.template-card .meta { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ==========================================================================
+   The placeholder menu.
+
+   Fixed rather than absolute: it is appended to the body so the drawer's own
+   overflow cannot clip it, and it follows the caret rather than the field.
+   ========================================================================== */
+
+.ac {
+  position: fixed; z-index: 80; min-width: 230px; max-width: 360px;
+  max-height: 232px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 6px 22px rgba(10, 14, 18, 0.16); padding: 4px;
+}
+
+.ac-item {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: 5px 8px; border-radius: var(--radius); cursor: pointer;
+  font-family: var(--mono); font-size: 12.5px; white-space: nowrap;
+}
+
+.ac-item .tag {
+  font-family: inherit; font-size: 10.5px; letter-spacing: 0.03em;
+  text-transform: uppercase; color: var(--subtle);
+}
+
+.ac-item.on { background: var(--accent-wash); color: var(--accent); }
+.ac-item.on .tag { color: var(--accent); }
+.ac-item b { color: var(--accent); font-weight: 700; }
+.ac-item.on b { text-decoration: underline; }
+
+.ac-empty { padding: 8px 9px; font-size: 12.5px; color: var(--muted); }

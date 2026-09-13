@@ -1,0 +1,76 @@
+# Everything that is not a secret.
+#
+# Both hosts read the same ConfigMap. That is deliberate: the safety rails are enforced by the engine and
+# reported by the API, and a deployment that configured them on one and not the other used to show a
+# console promising protection nobody was enforcing. Sharing the ConfigMap makes them agree by
+# construction, and the dashboard says so out loud when they do not.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentinel
+  namespace: sentinel
+data:
+  # -- what the engine does -------------------------------------------------------------------
+
+  Engine__Enabled: "true"
+  Engine__TickSeconds: "10"
+  Engine__LeaseSeconds: "120"
+
+  # Rules evaluated at once on one node. Raising it makes the engine ask more of Elasticsearch at the
+  # same moment, not of itself — the work is waiting on searches.
+  Engine__MaxConcurrentRules: "4"
+  Engine__MaxBackoffSeconds: "900"
+
+  # -- the safety rails -----------------------------------------------------------------------
+
+  # The kill switch. False stops every disruptive action platform-wide while detection and notification
+  # continue, which is what you want at 3 a.m. when a rule is blocking the wrong thing.
+  Safety__ActionsEnabled: "true"
+
+  Safety__MaxDisruptiveActionsPerRule: "25"
+  Safety__RateWindowSeconds: "60"
+  Safety__MaxDisruptiveActionsGlobal: "100"
+
+  # THE ONE TO FILL IN BEFORE ARMING ANYTHING THAT BLOCKS.
+  #
+  # The first time a brute-force rule runs against a network behind NAT, the address it identifies is the
+  # office's egress address — and blocking it takes the whole company off the internet. These are the
+  # ranges the platform will refuse to act on however convincing the evidence.
+  #
+  # The dashboard shows a warning while this is empty. That warning is not decoration.
+  Safety__NeverBlockAddresses__0: "10.0.0.0/8"
+  Safety__NeverBlockAddresses__1: "192.168.0.0/16"
+  Safety__NeverBlockAddresses__2: "172.16.0.0/12"
+
+  # Accounts that must never be suspended: break-glass administrators, service accounts the estate runs on.
+  Safety__NeverBlockUsers__0: "admin"
+
+  # -- reaching out ---------------------------------------------------------------------------
+
+  # Where the platform is willing to send a request. Elasticsearch and the response services are
+  # normally inside the cluster or the estate, so private networks are permitted; loopback is not, because
+  # loopback from a pod is the pod itself.
+  Outbound__AllowPrivateNetworks: "true"
+  Outbound__AllowLoopback: "false"
+
+  Retry__MaxAttempts: "3"
+  Retry__BaseDelayMs: "2000"
+  Retry__MaxDelayMs: "30000"
+
+  # -- the API host ---------------------------------------------------------------------------
+
+  # The networks the ingress controller sits in. Until this is set, the audit trail records the socket
+  # address — which behind an ingress is the ingress pod, so every entry would name the proxy rather than
+  # the person. X-Forwarded-For is honoured only from here, because a header anyone can set is not
+  # evidence: trusting it unconditionally would let a caller write any address they liked into the audit.
+  #
+  # Set it to the pod CIDR of the nodes the ingress controller runs on.
+  Hosting__TrustedProxies__0: "10.42.0.0/16"
+
+  # Both hosts. Neither migrates on startup — the Job does that, once.
+  Database__MigrateOnStartup: "false"
+
+  Logging__LogLevel__Default: "Information"
+  Logging__LogLevel__Microsoft.AspNetCore: "Warning"
+  Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: "Warning"

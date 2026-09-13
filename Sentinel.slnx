@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Sentinel.Api/Sentinel.Api.csproj" />
+    <Project Path="src/Sentinel.Application/Sentinel.Application.csproj" />
+    <Project Path="src/Sentinel.Domain/Sentinel.Domain.csproj" />
+    <Project Path="src/Sentinel.Engine/Sentinel.Engine.csproj" />
+    <Project Path="src/Sentinel.Infrastructure/Sentinel.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Sentinel.Tests/Sentinel.Tests.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/ServiceStub/ServiceStub.csproj" />
+  </Folder>
+</Solution>

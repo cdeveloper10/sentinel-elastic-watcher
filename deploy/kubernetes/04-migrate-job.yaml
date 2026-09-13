@@ -1,0 +1,89 @@
+# Applies the schema, once, before anything else runs.
+#
+# A Job rather than a step in either host's startup. Two reasons, and the second is the one that matters:
+# several replicas racing to migrate one database is how a half-applied schema happens; and a migration
+# that fails should fail something an operator is looking at, not leave pods crash-looping with the reason
+# buried in their logs.
+#
+# Idempotent — it reports "the schema is up to date" and exits 0 when there is nothing to apply — so it is
+# safe to run on every deploy. With Helm or Argo this is a pre-upgrade hook or a sync wave before the
+# Deployments; applied by hand, run it and wait for completion first:
+#
+#   kubectl -n sentinel apply -f 04-migrate-job.yaml
+#   kubectl -n sentinel wait --for=condition=complete job/sentinel-migrate --timeout=5m
+#
+# The name carries the version so a redeploy creates a new Job rather than colliding with the completed
+# one — a Job's pod template is immutable.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sentinel-migrate-1-0-0
+  namespace: sentinel
+  labels:
+    app.kubernetes.io/name: sentinel
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 3
+
+  # Kept after it finishes, long enough for somebody to read why. Without this the evidence of a failed
+  # deploy disappears on the cluster's own schedule.
+  ttlSecondsAfterFinished: 86400
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sentinel
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: sentinel
+      automountServiceAccountToken: false
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 64198
+        runAsGroup: 64198
+        fsGroup: 64198
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: migrate
+          image: sentinel/engine:1.0.0
+          imagePullPolicy: IfNotPresent
+          args: ["--migrate"]
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          env:
+            - name: ConnectionStrings__Sentinel
+              valueFrom:
+                secretKeyRef:
+                  name: sentinel
+                  key: ConnectionStrings__Sentinel
+
+            # Needed even here: the host resolves the secret protector at startup, so a malformed key
+            # fails the Job rather than the first request that touches a credential.
+            - name: Secrets__Key
+              valueFrom:
+                secretKeyRef:
+                  name: sentinel
+                  key: Secrets__Key
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+
+      volumes:
+        # The root filesystem is read-only; .NET still wants somewhere to write.
+        - name: tmp
+          emptyDir: {}

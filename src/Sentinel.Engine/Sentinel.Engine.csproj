@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The detection loop, as its own process. Separate from the API because the two scale on unrelated
+    things: the API on how many people are reading, the engine on how large the estate being watched is.
+
+    A web SDK rather than a worker only so the container can be probed — the listener serves health and a
+    read-only status endpoint, and nothing else.
+  -->
+
+  <PropertyGroup>
+    <UserSecretsId>sentinel-engine</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sentinel.Infrastructure\Sentinel.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

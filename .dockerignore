@@ -1,0 +1,21 @@
+# Everything the build does not need, and a few things it must never receive.
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/*.user
+
+# Tests and samples are not in either image. The sample stub in particular must not be shipped: it
+# accepts anything and authenticates nobody.
+tests/
+samples/
+
+# Local configuration carries the developer's own connection string and encryption key. In a cluster both
+# arrive from a Secret, and copying these in would bake one machine's credentials into the image.
+**/appsettings.Development.json
+**/appsettings.Local.json
+
+.git/
+.github/
+deploy/
+*.md

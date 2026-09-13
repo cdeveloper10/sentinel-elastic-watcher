@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+
+  "profiles": {
+    "SMS gateway (9310)": {
+      "commandName": "Project",
+      "launchBrowser": false,
+
+      "//": [
+        "0.0.0.0, not localhost. The generated profile bound localhost on a random port, which leaves the",
+        "stub unreachable from anything but this machine's own loopback — and Sentinel refuses loopback on",
+        "purpose, because loopback from a pod is the pod itself. Point a connection at this machine's LAN",
+        "address and this port.",
+        "",
+        "No HTTPS either: Sentinel calls the stub over plain HTTP, and a development certificate would only",
+        "fail validation on the way in.",
+        "",
+        "Two profiles because two services is the case worth rehearsing. A rule that blocks an address and",
+        "also tells somebody has to reach two systems, and 'it called something' is not the same as 'it",
+        "called the right one'."
+      ],
+
+      "applicationUrl": "http://0.0.0.0:9310",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "STUB_NAME": "sms gateway"
+      }
+    },
+
+    "Security API (9320)": {
+      "commandName": "Project",
+      "launchBrowser": false,
+      "applicationUrl": "http://0.0.0.0:9320",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "STUB_NAME": "security api"
+      }
+    }
+  }
+}

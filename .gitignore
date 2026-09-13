@@ -1,0 +1,13 @@
+# Build output. Reproducible from source, and large enough to make a diff unreadable.
+bin/
+obj/
+dist/
+
+# IDE state, per-machine and not shared.
+.vs/
+*.user
+*.slnLaunch.user
+
+# Test results.
+TestResults/
+*.trx

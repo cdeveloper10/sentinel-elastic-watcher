@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+
+    <!--
+      SQLite, not EF Core's in-memory provider: that provider ignores unique indexes, and deduplication
+      and action idempotency in this platform *are* unique indexes. Testing them against it would assert
+      nothing while appearing to pass.
+    -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+
+    <!-- Lets the PostgreSQL integration tests skip themselves when no server is configured. -->
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Sentinel.Domain\Sentinel.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Sentinel.Application\Sentinel.Application.csproj" />
+    <ProjectReference Include="..\..\src\Sentinel.Infrastructure\Sentinel.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Sentinel.Api\Sentinel.Api.csproj" />
+  </ItemGroup>
+
+</Project>

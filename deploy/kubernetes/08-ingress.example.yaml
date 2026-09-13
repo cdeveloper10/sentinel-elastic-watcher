@@ -1,0 +1,38 @@
+# An example. The host, the class and the certificate are the estate's.
+#
+# TLS is not optional here. The session cookie is marked Secure outside development, so it is simply not
+# sent over plain HTTP — the console would appear to sign in and then behave as though it had not. And the
+# platform can block network traffic; its console does not belong on an unencrypted connection.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sentinel
+  namespace: sentinel
+  annotations:
+    # The console is a single-page app that sends JSON. Bodies are small; rules and payloads are the
+    # largest thing it posts.
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+
+    # A dry run against a wide index can take a while to come back.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: nginx
+
+  tls:
+    - hosts: [sentinel.example.internal]
+      secretName: sentinel-tls
+
+  rules:
+    - host: sentinel.example.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sentinel-api
+                port:
+                  name: http

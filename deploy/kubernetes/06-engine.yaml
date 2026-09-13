@@ -1,0 +1,141 @@
+# The detection engine.
+#
+# One replica is the honest default. The engine can run as several — every rule is claimed under a lease
+# before it is evaluated, so two nodes never evaluate one rule at the same moment and never double an
+# alert or a block. But one engine handles a large estate comfortably, and a second buys availability
+# rather than throughput: detection resumes on the next tick either way, and the checkpoint means the
+# windows a stopped engine missed are examined when it comes back rather than lost.
+#
+# Raise it when a tick stops finishing inside its interval. The dashboard shows each node's last tick
+# duration, which is the number to watch.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-engine
+  namespace: sentinel
+  labels:
+    app.kubernetes.io/name: sentinel
+    app.kubernetes.io/component: engine
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sentinel
+      app.kubernetes.io/component: engine
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # The old pod goes first. Two engines briefly overlapping is safe — leases see to that — but there
+      # is no reason to pay for it, and a rule mid-evaluation keeps its lease until it expires.
+      maxUnavailable: 1
+      maxSurge: 0
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sentinel
+        app.kubernetes.io/component: engine
+    spec:
+      serviceAccountName: sentinel
+      automountServiceAccountToken: false
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 64198
+        runAsGroup: 64198
+        fsGroup: 64198
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: engine
+          image: sentinel/engine:1.0.0
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          envFrom:
+            - configMapRef:
+                name: sentinel
+
+          env:
+            - name: ConnectionStrings__Sentinel
+              valueFrom:
+                secretKeyRef:
+                  name: sentinel
+                  key: ConnectionStrings__Sentinel
+            - name: Secrets__Key
+              valueFrom:
+                secretKeyRef:
+                  name: sentinel
+                  key: Secrets__Key
+
+            # Identifies this node in leases, in logs, and on the dashboard. The pod name, so a heartbeat
+            # can be traced back to a pod whose logs somebody can read.
+            - name: Engine__NodeId
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          livenessProbe:
+            httpGet: { path: /health/live, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { memory: 1Gi }
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+      # Long enough for a tick in flight to finish and release its leases. A killed engine's leases expire
+      # on their own after Engine__LeaseSeconds, so this costs a delay rather than correctness.
+      terminationGracePeriodSeconds: 60
+
+---
+# Not exposed outside the cluster. It carries /health and /status only — no console, no API — and exists
+# so a person or a scrape can ask a specific engine how it is doing.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentinel-engine
+  namespace: sentinel
+  labels:
+    app.kubernetes.io/name: sentinel
+    app.kubernetes.io/component: engine
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: sentinel
+    app.kubernetes.io/component: engine
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

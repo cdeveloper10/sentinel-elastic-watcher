@@ -1,0 +1,36 @@
+# Applies everything except the two examples, which have to be filled in first.
+#
+# The Job is listed but ordering is not something kustomize enforces: apply it and wait for completion
+# before the Deployments, or use a tool that understands waves. See deploy/README.md.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sentinel
+
+resources:
+  - 00-namespace.yaml
+  - 01-serviceaccount.yaml
+  - 03-config.yaml
+  - 04-migrate-job.yaml
+  - 05-api.yaml
+  - 06-engine.yaml
+  - 07-networkpolicy.yaml
+
+# `labels` with includeSelectors off, not `commonLabels`.
+#
+# commonLabels copies every pair into the selectors too — including the version — and a Deployment's
+# selector is immutable. The first deploy works; upgrading to 1.0.1 fails with "field is immutable" and
+# the only way forward is deleting the Deployment, which takes the console down with it. A version belongs
+# on the object and on the pods, never in what the ReplicaSet matches on.
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: sentinel
+      app.kubernetes.io/version: 1.0.0
+
+images:
+  - name: sentinel/api
+    newTag: 1.0.0
+  - name: sentinel/engine
+    newTag: 1.0.0
