@@ -181,7 +181,32 @@ kubectl -n sentinel exec deploy/sentinel-api -- dotnet Sentinel.Api.dll --reset-
 
 It re-enables the account and restores the Admin role as well as setting a password, because the situation
 it exists for is "nobody can administer the platform", and fixing only the password would leave a disabled
-account still unable to sign in.
+account still unable to sign in. It prints once and exits without serving; there must already be at least
+one account, so start the API normally once before reaching for it.
+
+### Reach the console over HTTPS, or you cannot sign in
+
+Outside Development the session cookie is issued `secure`:
+
+```
+Set-Cookie: sentinel.session=…; path=/; secure; samesite=lax; httponly
+```
+
+Browsers accept a `secure` cookie over plain HTTP **only on `localhost`**. Reached on
+`http://10.0.0.5:8080`, the sign-in request succeeds with 200, the browser discards the cookie, the next
+request is 401 and the console shows the sign-in form again — with no error anywhere, because nothing
+failed. The session was simply never stored.
+
+That is the intended behaviour: a session cookie for a console that can block network traffic must not
+travel in the clear. Terminate TLS at the ingress. To look at it quickly without one, come in on
+localhost:
+
+```bash
+kubectl -n sentinel port-forward deploy/sentinel-api 8080:8080
+```
+
+`ASPNETCORE_ENVIRONMENT=Development` relaxes the policy to `SameAsRequest` and belongs on a laptop, never
+on a cluster.
 
 ---
 
