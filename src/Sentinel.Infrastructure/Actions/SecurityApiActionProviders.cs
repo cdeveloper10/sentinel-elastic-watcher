@@ -214,7 +214,7 @@ public sealed class BlockIpActionProvider(
     ConnectionHttpClients clients,
     IConnectionSecrets secrets,
     ILogger<BlockIpActionProvider> logger)
-    : HttpActionProvider(clients, secrets, logger)
+    : HttpActionProvider(clients, secrets, logger), IReversibleAction
 {
     public override string Type => "block_ip";
 
@@ -222,6 +222,23 @@ public sealed class BlockIpActionProvider(
 
     /// <summary>Where a security API conventionally blocks an address. A connection may say otherwise.</summary>
     private const string DefaultEndpointPath = "/security/block/ip";
+
+    public string DefaultReversePath => "/security/unblock/ip";
+
+    public Task<ActionOutcome> ReverseAsync(
+        string target, Connection connection, string idempotencyKey, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(target))
+            return Task.FromResult(ActionOutcome.Permanent(
+                "NO_TARGET", "That execution recorded no address, so there is nothing to unblock."));
+
+        var payload = new JsonObject { ["ip"] = target, ["reason"] = "Reversed from Sentinel." };
+
+        return PostAsync(
+            connection,
+            ConnectionPaths.For(connection, ConnectionPaths.ReversePathKey(Type), DefaultReversePath),
+            payload, idempotencyKey, [], ct);
+    }
 
     public override ActionDescriptor Describe() => new(
         Type,
@@ -239,7 +256,8 @@ public sealed class BlockIpActionProvider(
                 Default: "1800",
                 Help: "How long the block lasts before the security API lifts it.")
         ],
-        DefaultPath: DefaultEndpointPath);
+        DefaultPath: DefaultEndpointPath,
+        IsReversible: true);
 
     public override ValidationResult Validate(
         IReadOnlyDictionary<string, string> settings, IReadOnlyCollection<string> availablePaths) =>
@@ -283,7 +301,7 @@ public sealed class BlockUserActionProvider(
     ConnectionHttpClients clients,
     IConnectionSecrets secrets,
     ILogger<BlockUserActionProvider> logger)
-    : HttpActionProvider(clients, secrets, logger)
+    : HttpActionProvider(clients, secrets, logger), IReversibleAction
 {
     public override string Type => "block_user";
 
@@ -291,6 +309,23 @@ public sealed class BlockUserActionProvider(
 
     /// <summary>Where a security API conventionally suspends an account. A connection may say otherwise.</summary>
     private const string DefaultEndpointPath = "/security/block/user";
+
+    public string DefaultReversePath => "/security/unblock/user";
+
+    public Task<ActionOutcome> ReverseAsync(
+        string target, Connection connection, string idempotencyKey, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(target))
+            return Task.FromResult(ActionOutcome.Permanent(
+                "NO_TARGET", "That execution recorded no account, so there is nothing to restore."));
+
+        var payload = new JsonObject { ["userId"] = target, ["reason"] = "Reversed from Sentinel." };
+
+        return PostAsync(
+            connection,
+            ConnectionPaths.For(connection, ConnectionPaths.ReversePathKey(Type), DefaultReversePath),
+            payload, idempotencyKey, [], ct);
+    }
 
     public override ActionDescriptor Describe() => new(
         Type,
@@ -307,7 +342,8 @@ public sealed class BlockUserActionProvider(
             new ActionSettingSchema("durationSeconds", "Suspend for", "duration", Required: false,
                 Default: "1800")
         ],
-        DefaultPath: DefaultEndpointPath);
+        DefaultPath: DefaultEndpointPath,
+        IsReversible: true);
 
     public override ValidationResult Validate(
         IReadOnlyDictionary<string, string> settings, IReadOnlyCollection<string> availablePaths) =>

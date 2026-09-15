@@ -45,6 +45,7 @@ public class SentinelDbContext(DbContextOptions<SentinelDbContext> options)
     public DbSet<RuleVersion> RuleVersions => Set<RuleVersion>();
     public DbSet<RuleCheckpoint> Checkpoints => Set<RuleCheckpoint>();
     public DbSet<EngineNode> EngineNodes => Set<EngineNode>();
+    public DbSet<Asset> Assets => Set<Asset>();
     public DbSet<RuleLease> RuleLeases => Set<RuleLease>();
     public DbSet<Alert> Alerts => Set<Alert>();
     public DbSet<ActionExecution> ActionExecutions => Set<ActionExecution>();
@@ -171,6 +172,12 @@ public class SentinelDbContext(DbContextOptions<SentinelDbContext> options)
             entity.Property(e => e.ResolvedBy).HasMaxLength(128);
             entity.Property(e => e.ResolutionNote).HasMaxLength(2048);
             entity.Property(e => e.SuppressionReason).HasMaxLength(512);
+            entity.Property(e => e.Disposition).HasMaxLength(24);
+            entity.Property(e => e.EnrichmentJson).HasColumnType("text");
+
+            // The rule-quality report groups by rule and disposition over the whole table, which is a scan
+            // without this and gets slower every week the platform runs.
+            entity.HasIndex(e => new { e.RuleId, e.Disposition });
         });
 
         model.Entity<ActionExecution>(entity =>
@@ -184,6 +191,20 @@ public class SentinelDbContext(DbContextOptions<SentinelDbContext> options)
 
             entity.HasIndex(e => new { e.AlertId, e.ActionType });
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
+
+            // "What is still in force" is the question an operator asks during an incident, and it wants
+            // an index rather than a scan of every action the platform has ever taken.
+            entity.HasIndex(e => new { e.ActionType, e.ReversedAt });
+
+            entity.Property(e => e.ReversedBy).HasMaxLength(128);
+            entity.Property(e => e.ReversalError).HasMaxLength(1024);
+
+            entity.Property(e => e.DecidedBy).HasMaxLength(128);
+            entity.Property(e => e.DecisionNote).HasMaxLength(1024);
+
+            // The sweep that expires unanswered approvals runs on every engine tick, so it must not be a
+            // scan of every action the platform has ever taken.
+            entity.HasIndex(e => new { e.Status, e.ApprovalExpiresAt });
 
             entity.Property(e => e.IdempotencyKey).HasMaxLength(64).IsRequired();
             entity.Property(e => e.ActionType).HasMaxLength(64).IsRequired();
@@ -211,6 +232,25 @@ public class SentinelDbContext(DbContextOptions<SentinelDbContext> options)
             entity.ToTable("rule_checkpoints");
             entity.HasKey(e => e.RuleId);
             entity.Property(e => e.LastError).HasMaxLength(2048);
+        });
+
+        model.Entity<Asset>(entity =>
+        {
+            entity.ToTable("assets");
+            entity.HasKey(e => e.Id);
+
+            // One row per thing. Two entries for 10.5.5.5 saying different criticalities is a question
+            // with no answer, and the enrichment would pick whichever the database returned first.
+            entity.HasIndex(e => e.Identifier).IsUnique();
+
+            entity.Property(e => e.Identifier).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Criticality).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Owner).HasMaxLength(128);
+            entity.Property(e => e.Environment).HasMaxLength(64);
+            entity.Property(e => e.Notes).HasMaxLength(1024);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(128);
         });
 
         model.Entity<EngineNode>(entity =>

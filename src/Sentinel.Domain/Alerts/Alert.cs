@@ -63,6 +63,33 @@ public class Alert
     public string? ResolutionNote { get; set; }
 
     /// <summary>
+    /// What the enrichments knew about this alert's subject, keyed <c>&lt;enrichment&gt;.&lt;fact&gt;</c>.
+    ///
+    /// Stored on the alert rather than looked up when somebody opens it, because it is evidence: what the
+    /// inventory said at the moment the platform decided is what explains the decision, and an inventory
+    /// edited next week must not change the answer to "why was this treated as critical".
+    ///
+    /// Null when no enrichment is registered or none had anything to say — those are different from an
+    /// empty object and the console says which.
+    /// </summary>
+    public string? EnrichmentJson { get; set; }
+
+    /// <summary>
+    /// Whether the alert deserved to exist. One of <see cref="AlertDisposition"/>, recorded when it is
+    /// resolved.
+    ///
+    /// The status says somebody looked; this says whether the rule was right, and they are different
+    /// questions. Without it "which of my rules are noise" cannot be answered at all — and a platform
+    /// nobody can answer that about is one whose alerts are eventually ignored wholesale, which is a
+    /// worse failure than any single missed detection.
+    ///
+    /// Null until an alert is resolved, and on every alert resolved before this existed. A rate computed
+    /// over alerts nobody has judged would be a number with no meaning, so those are excluded rather than
+    /// assumed either way.
+    /// </summary>
+    public string? Disposition { get; set; }
+
+    /// <summary>
     /// True when the rule fired but its actions were deliberately not run — a dry run never writes alerts,
     /// but a safety rail or a disabled dispatcher can produce one.
     /// </summary>
@@ -71,6 +98,48 @@ public class Alert
     public string? SuppressionReason { get; set; }
 
     public ICollection<ActionExecution> Executions { get; set; } = [];
+}
+
+/// <summary>
+/// What an alert turned out to be.
+///
+/// Four values rather than two, because "the rule was wrong" and "the rule was right and the activity was
+/// authorised" are different facts and only the first is a defect. A backup job that trips a rule every
+/// Sunday night is a benign positive: the detection worked, and what wants fixing is an exception, not the
+/// rule's logic. Counting those as false positives would condemn rules that are working.
+/// </summary>
+public static class AlertDisposition
+{
+    /// <summary>Real, and worth acting on.</summary>
+    public const string TruePositive = "TRUE_POSITIVE";
+
+    /// <summary>The rule matched something it should not have. The only value that counts as a defect.</summary>
+    public const string FalsePositive = "FALSE_POSITIVE";
+
+    /// <summary>The rule matched correctly, and the activity was authorised or expected.</summary>
+    public const string Benign = "BENIGN";
+
+    /// <summary>The same event, already covered by another alert.</summary>
+    public const string Duplicate = "DUPLICATE";
+
+    public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        TruePositive, FalsePositive, Benign, Duplicate
+    };
+
+    public static bool IsKnown(string? value) => value is not null && All.Contains(value);
+
+    public static string? Canonical(string? value) =>
+        value is null ? null : All.FirstOrDefault(v => v.Equals(value, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Whether this disposition counts against the rule that produced it.
+    ///
+    /// Only a false positive does. A duplicate is a grouping problem, a benign positive wants an exception,
+    /// and neither says the detection logic is wrong.
+    /// </summary>
+    public static bool IsRuleDefect(string? value) =>
+        FalsePositive.Equals(value, StringComparison.OrdinalIgnoreCase);
 }
 
 public static class AlertStatus

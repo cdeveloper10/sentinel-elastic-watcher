@@ -66,6 +66,12 @@ public sealed class DetectionEngineService(
         // process lifetime would accumulate every entity the engine has ever touched.
         await using var scope = scopes.CreateAsyncScope();
 
+        // Before evaluating, not after: an action held for approval an hour ago should be closed out
+        // before this tick raises alerts that may hold more. Cheap — one indexed statement that usually
+        // touches nothing.
+        await scope.ServiceProvider.GetRequiredService<IApprovalSweep>()
+            .ExpireApprovalsAsync(DateTime.UtcNow, ct);
+
         var scheduler = scope.ServiceProvider.GetRequiredService<RuleScheduler>();
         var outcomes = await scheduler.TickAsync(ct);
 

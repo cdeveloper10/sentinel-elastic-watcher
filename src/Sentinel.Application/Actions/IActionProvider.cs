@@ -67,7 +67,49 @@ public sealed record ActionDescriptor(
     /// particular action is. The path belongs to the connection because it describes the service, not the
     /// rule: every rule pointing at one gateway calls the same endpoint on it.
     /// </summary>
-    string DefaultPath = "");
+    string DefaultPath = "",
+
+    /// <summary>
+    /// Whether this action can be taken back, which is not the same as whether it should be retried.
+    ///
+    /// An address can be unblocked; a message cannot be unsent. Published so the console offers the button
+    /// on exactly the executions where it will work rather than on every disruptive one. Kept in step with
+    /// the interface by a test, because a descriptor claiming more than its provider implements is a button
+    /// that fails at the moment somebody most needs it.
+    /// </summary>
+    bool IsReversible = false);
+
+/// <summary>
+/// An action that can be taken back.
+///
+/// This is the half of automated response the platform was missing. Something that blocks addresses on
+/// its own and cannot unblock one is not automation with a safety rail — it is a decision nobody can
+/// revisit, and the occasions it is wrong are precisely the occasions somebody needs it undone within the
+/// minute. Expiry through the gateway is not the same thing: that is a promise made by a system this one
+/// does not control, on a schedule nobody here can shorten.
+///
+/// A reversal is its own act with its own idempotency key and its own execution record. It is not an edit
+/// of the original: what the platform did at three in the morning happened, and the record of it must not
+/// be rewritten by somebody undoing it at nine.
+/// </summary>
+public interface IReversibleAction
+{
+    /// <summary>Where the service conventionally undoes this. A connection may say otherwise.</summary>
+    string DefaultReversePath { get; }
+
+    /// <summary>
+    /// Undoes one earlier execution.
+    ///
+    /// Takes the target rather than an <see cref="ActionContext"/> because the alert it came from may be
+    /// weeks old and its evidence is not what is needed: what is being undone is what was done, and that
+    /// is the target the execution recorded.
+    /// </summary>
+    Task<ActionOutcome> ReverseAsync(
+        string target,
+        Connection connection,
+        string idempotencyKey,
+        CancellationToken ct = default);
+}
 
 /// <summary>
 /// How one kind of response is carried out.

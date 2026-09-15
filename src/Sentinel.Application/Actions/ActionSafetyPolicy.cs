@@ -36,6 +36,16 @@ public sealed class ActionSafetySettings
 
     /// <summary>Ceiling across every rule, for the case where several rules go wrong together.</summary>
     public int MaxDisruptiveActionsGlobal { get; set; } = 100;
+
+    /// <summary>
+    /// How long an action that needs approval waits for one before expiring unperformed.
+    ///
+    /// An hour, because the answer is wanted while the incident is still happening. An approval that waits
+    /// indefinitely is not a gate but a queue nobody empties, and saying yes to it the next morning blocks
+    /// an address over a situation that ended hours ago. Expiring is the safe direction: the action does
+    /// not happen, and the record says nobody answered.
+    /// </summary>
+    public int ApprovalWindowSeconds { get; set; } = 3600;
 }
 
 /// <summary>Counts disruptive actions so the caps can be enforced across restarts and across nodes.</summary>
@@ -67,6 +77,15 @@ public sealed class ActionSafetyPolicy(ActionSafetySettings settings, IActionRat
     public const string CodeRuleRateLimited = "RULE_RATE_LIMITED";
     public const string CodeGlobalRateLimited = "GLOBAL_RATE_LIMITED";
     public const string CodeNoTarget = "NO_TARGET";
+
+    /// <summary>
+    /// How long a gated action waits for a decision.
+    ///
+    /// Exposed here rather than injected into the dispatcher separately, because it is a safety setting
+    /// and the dispatcher already holds the policy that owns them. Floored at a minute: a window shorter
+    /// than that expires before anyone could have seen the request.
+    /// </summary>
+    public TimeSpan ApprovalWindow => TimeSpan.FromSeconds(Math.Max(60, settings.ApprovalWindowSeconds));
 
     /// <summary>
     /// Checked before an attempt. Non-disruptive actions — notifying a person — skip the caps entirely:
@@ -122,7 +141,17 @@ public sealed class ActionSafetyPolicy(ActionSafetySettings settings, IActionRat
     /// range form is what makes the list usable: an operator protects <c>10.0.0.0/8</c> once rather than
     /// enumerating the estate.
     /// </summary>
-    internal bool IsProtectedAddress(string target)
+    internal bool IsProtectedAddress(string target) => IsProtectedAddress(settings, target);
+
+    /// <summary>
+    /// The same question, without needing a policy.
+    ///
+    /// Static because the enrichment that reports "this address is protected" needs only the list, and
+    /// constructing a policy to ask would have dragged in the rate store it uses for the caps — which is
+    /// scoped, holds a DbContext, and would have made the enrichment scoped for no reason. Shared rather
+    /// than reimplemented so what the enrichment reports and what the dispatcher will do cannot disagree.
+    /// </summary>
+    internal static bool IsProtectedAddress(ActionSafetySettings settings, string target)
     {
         if (!IPAddress.TryParse(target, out var address))
             return settings.NeverBlockAddresses.Contains(target, StringComparer.OrdinalIgnoreCase);

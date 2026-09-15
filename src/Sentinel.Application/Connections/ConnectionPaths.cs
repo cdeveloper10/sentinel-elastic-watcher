@@ -33,6 +33,14 @@ public static class ConnectionPaths
     public const int MaxLength = 200;
 
     /// <summary>
+    /// The key an action's <em>undo</em> endpoint is configured under: <c>block_ip.reverse</c>.
+    ///
+    /// A suffix on the same dictionary rather than a second one, so a service that undoes at an
+    /// unconventional path is configured exactly the way one that blocks at an unconventional path is.
+    /// </summary>
+    public static string ReversePathKey(string actionType) => $"{actionType}.reverse";
+
+    /// <summary>
     /// The path this action should call on this connection, or <paramref name="fallback"/> when the
     /// connection says nothing about it.
     /// </summary>

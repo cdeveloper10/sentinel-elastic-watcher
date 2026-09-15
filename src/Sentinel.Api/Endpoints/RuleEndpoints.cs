@@ -108,6 +108,7 @@ public static class RuleEndpoints
         SentinelDbContext db,
         RuleValidator validator,
         IActionRegistry actions,
+        Application.Enrichment.EnrichmentPipeline enrichment,
         IDetectionStrategyRegistry strategies,
         IAuditTrail audit,
         CurrentUser current,
@@ -115,7 +116,7 @@ public static class RuleEndpoints
         CancellationToken ct)
     {
         var draft = ToDefinition(0, 1, request);
-        var validation = await ValidateAsync(validator, db, draft, request.ConnectionId, actions, strategies, ct);
+        var validation = await ValidateAsync(validator, db, draft, request.ConnectionId, actions, strategies, EnrichmentPaths(enrichment), ct);
 
         if (!validation.IsValid)
             return ConnectionEndpoints.Problems(validation);
@@ -174,6 +175,7 @@ public static class RuleEndpoints
         SentinelDbContext db,
         RuleValidator validator,
         IActionRegistry actions,
+        Application.Enrichment.EnrichmentPipeline enrichment,
         IDetectionStrategyRegistry strategies,
         IAuditTrail audit,
         CurrentUser current,
@@ -186,7 +188,7 @@ public static class RuleEndpoints
 
         var nextVersion = rule.CurrentVersion + 1;
         var draft = ToDefinition(id, nextVersion, request);
-        var validation = await ValidateAsync(validator, db, draft, request.ConnectionId, actions, strategies, ct);
+        var validation = await ValidateAsync(validator, db, draft, request.ConnectionId, actions, strategies, EnrichmentPaths(enrichment), ct);
 
         if (!validation.IsValid)
             return ConnectionEndpoints.Problems(validation);
@@ -452,6 +454,13 @@ public static class RuleEndpoints
     /// malformed query saved cleanly and failed on the first evaluation — at whatever hour that was. The
     /// check and its message already existed; only the wiring was missing.
     /// </summary>
+    /// <summary>
+    /// What the registered enrichments will attach, so a rule may name them and a rule naming one that no
+    /// enrichment produces is refused — the same bargain the rest of the vocabulary makes.
+    /// </summary>
+    private static IReadOnlyList<string> EnrichmentPaths(Application.Enrichment.EnrichmentPipeline enrichment) =>
+        enrichment.Describe().SelectMany(e => e.Facts.Select(f => $"enrich.{e.Name}.{f}")).ToList();
+
     private static string? QueryProblem(string? queryJson) =>
         Infrastructure.Elasticsearch.ElasticsearchQueryBuilder.IsValidQuery(queryJson, out var error)
             ? null
@@ -515,6 +524,7 @@ public static class RuleEndpoints
         int connectionId,
         IActionRegistry actions,
         IDetectionStrategyRegistry strategies,
+        IReadOnlyList<string> enrichmentPaths,
         CancellationToken ct)
     {
         var failures = validator.Validate(draft, QueryProblem).Failures.ToList();
@@ -528,7 +538,7 @@ public static class RuleEndpoints
             failures.Add(new Application.Connections.ValidationFailure(
                 "connectionId", $"'{source.Name}' is a {source.Type} connection, which is not an event source."));
 
-        failures.AddRange(await ValidateActionsAsync(db, draft, actions, strategies, ct));
+        failures.AddRange(await ValidateActionsAsync(db, draft, actions, strategies, enrichmentPaths, ct));
 
         return failures.Count == 0
             ? Application.Connections.ValidationResult.Success
@@ -550,6 +560,7 @@ public static class RuleEndpoints
         RuleDefinition draft,
         IActionRegistry actions,
         IDetectionStrategyRegistry strategies,
+        IReadOnlyList<string> enrichmentPaths,
         CancellationToken ct)
     {
         var failures = new List<Application.Connections.ValidationFailure>();
@@ -606,7 +617,7 @@ public static class RuleEndpoints
 
             // Per action, not per rule: an action may name what the actions before it did, and must not be
             // allowed to name what the ones after it will do.
-            var vocabulary = RuleVocabulary.ForAction(draft, strategies, i);
+            var vocabulary = RuleVocabulary.ForAction(draft, strategies, i, enrichmentPaths);
 
             failures.AddRange(provider.Validate(binding.Settings, vocabulary).Failures
                 .Select(f => new Application.Connections.ValidationFailure($"actions[{i}].{f.Field}", f.Message)));
@@ -633,7 +644,7 @@ public static class RuleEndpoints
         TimeSpan.FromSeconds(request.IntervalSeconds),
         TimeSpan.FromSeconds(request.CooldownSeconds),
         (request.Actions ?? []).Select(a => new RuleActionBinding(
-            a.Type, a.Connection, a.Settings ?? new Dictionary<string, string>())).ToList());
+            a.Type, a.Connection, a.Settings ?? new Dictionary<string, string>(), a.RequiresApproval)).ToList());
 
     private static RuleVersion ToVersion(
         int ruleId, int version, RuleRequest request, string author, DateTime now) => new()

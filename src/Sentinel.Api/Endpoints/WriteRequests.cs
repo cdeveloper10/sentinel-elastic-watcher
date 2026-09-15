@@ -41,7 +41,10 @@ public sealed record ConnectionRequest(
 public sealed record RuleActionRequest(
     string Type,
     string Connection,
-    Dictionary<string, string>? Settings);
+    Dictionary<string, string>? Settings,
+
+    /// <summary>Whether a person has to say yes before this runs. Absent reads as no gate.</summary>
+    bool RequiresApproval = false);
 
 public sealed record RuleRequest(
     string Name,
@@ -86,7 +89,26 @@ public sealed record ConditionPreviewRequest(
     long Threshold,
     int LookbackMinutes = 15);
 
-public sealed record ResolveAlertRequest(string? Note);
+/// <summary>
+/// Closing an alert, and saying what it turned out to be.
+///
+/// The disposition is required rather than optional, which is the whole point of it: a field people may
+/// skip is a field that is empty on most rows, and a false-positive rate computed from a quarter of the
+/// alerts is worse than none because it looks authoritative.
+/// </summary>
+public sealed record ResolveAlertRequest(string? Note, string? Disposition);
+
+/// <summary>Declining a held action. The reason is the useful half — "no" alone teaches nobody anything.</summary>
+public sealed record RejectActionRequest(string? Reason);
+
+public sealed record AssetRequest(
+    string Identifier,
+    string Kind,
+    string Name,
+    string Criticality,
+    string? Owner,
+    string? Environment,
+    string? Notes);
 
 public sealed record ResetCheckpointRequest(DateTimeOffset? To);
 

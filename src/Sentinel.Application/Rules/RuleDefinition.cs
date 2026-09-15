@@ -7,7 +7,16 @@ namespace Sentinel.Application.Rules;
 public sealed record RuleActionBinding(
     string Type,
     string Connection,
-    IReadOnlyDictionary<string, string> Settings)
+    IReadOnlyDictionary<string, string> Settings,
+
+    /// <summary>
+    /// Whether a person has to say yes before this runs.
+    ///
+    /// On the binding rather than among the provider's settings, because gating is not a property of the
+    /// action: every action can be gated, and a provider should not have to know that gating exists. It is
+    /// the same kind of decision as which connection to use — the rule's, not the action's.
+    /// </summary>
+    bool RequiresApproval = false)
 {
     public string Setting(string key, string fallback = "") =>
         Settings.TryGetValue(key, out var value) ? value : fallback;
@@ -97,7 +106,12 @@ public static class RuleDefinitionMapper
                 .Select(binding => new RuleActionBinding(
                     binding.Type!.Trim(),
                     binding.Connection?.Trim() ?? "",
-                    binding.Settings ?? new Dictionary<string, string>()))
+                    binding.Settings ?? new Dictionary<string, string>(),
+
+                    // Absent in every version stored before gating existed, and those rules must keep
+                    // running exactly as they did — false is the only reading that does not silently
+                    // park an action somebody has been relying on.
+                    binding.RequiresApproval ?? false))
                 .ToList();
         }
         catch (JsonException)
@@ -113,7 +127,8 @@ public static class RuleDefinitionMapper
         {
             Type = a.Type,
             Connection = a.Connection,
-            Settings = a.Settings.ToDictionary(p => p.Key, p => p.Value)
+            Settings = a.Settings.ToDictionary(p => p.Key, p => p.Value),
+            RequiresApproval = a.RequiresApproval
         }));
 
     private sealed class ActionBindingDto
@@ -121,5 +136,8 @@ public static class RuleDefinitionMapper
         public string? Type { get; set; }
         public string? Connection { get; set; }
         public Dictionary<string, string>? Settings { get; set; }
+
+        /// <summary>Nullable so an older stored version, which has no such property, reads as false.</summary>
+        public bool? RequiresApproval { get; set; }
     }
 }

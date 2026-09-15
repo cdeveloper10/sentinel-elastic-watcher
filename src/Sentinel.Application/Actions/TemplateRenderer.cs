@@ -104,7 +104,7 @@ public static class TemplateRenderer
     /// between two documents in the same index. A prefix match is as strict as this can be without
     /// refusing rules that would have worked.
     /// </summary>
-    private static readonly string[] OpenPrefixes = ["event.", "sample."];
+    private static readonly string[] OpenPrefixes = ["event.", "sample.", "enrich."];
 
     private static bool IsWildcardPrefixed(string path, HashSet<string> known) =>
         OpenPrefixes.Any(prefix =>

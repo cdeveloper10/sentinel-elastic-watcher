@@ -101,6 +101,7 @@ const ROUTES = [
   { id: 'dashboard',   label: 'Dashboard',  needs: 'rules.read' },
   { id: 'connections', label: 'Connections', needs: 'connections.read' },
   { id: 'rules',       label: 'Rules',       needs: 'rules.read' },
+  { id: 'assets',      label: 'Assets',      needs: 'connections.read' },
   { id: 'alerts',      label: 'Alerts',      needs: 'alerts.read' },
   { id: 'executions',  label: 'Actions',     needs: 'actions.read' },
   { id: 'audit',       label: 'Audit',       needs: 'audit.read' },
@@ -130,12 +131,18 @@ async function load(route) {
       get('/api/action-types', 'actionTypes'),
       get('/api/detection-strategies', 'strategies'),
       get('/api/placeholders', 'placeholders'),
-      get('/api/rule-templates', 'templates')
+      get('/api/rule-templates', 'templates'),
+      get('/api/rules/quality', 'quality')
     ]);
+  } else if (route === 'assets') {
+    await get('/api/assets', 'assets');
   } else if (route === 'alerts') {
     await get('/api/alerts?take=100', 'alerts');
   } else if (route === 'executions') {
-    await get('/api/action-executions?take=100', 'executions');
+    await Promise.all([
+      get('/api/action-executions?take=100', 'executions'),
+      get('/api/action-types', 'actionTypes')
+    ]);
   } else if (route === 'audit') {
     await get('/api/audit?take=200', 'audit');
   } else if (route === 'users') {
@@ -235,7 +242,7 @@ function shell() {
   if (state.busy) main.appendChild(el('<div class="notice info"><span class="spinner"></span> Working…</div>'));
 
   const page = ({
-    dashboard: dashboardPage, connections: connectionsPage, rules: rulesPage,
+    dashboard: dashboardPage, connections: connectionsPage, rules: rulesPage, assets: assetsPage,
     alerts: alertsPage, executions: executionsPage, audit: auditPage, users: usersPage
   })[state.route];
 

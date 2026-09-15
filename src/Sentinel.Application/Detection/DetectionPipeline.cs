@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Sentinel.Application.Enrichment;
 using Sentinel.Application.EventSources;
 using Sentinel.Application.Rules;
 using Sentinel.Domain.Alerts;
@@ -58,9 +59,17 @@ public interface IAlertStore
 /// actually holds under concurrency: two nodes evaluating the same window will both pass the cooldown
 /// check, and only one insert will win the unique index.
 /// </summary>
-public sealed class DetectionPipeline(IAlertStore alerts, ICooldownStore cooldowns, TimeProvider? clock = null)
+public sealed class DetectionPipeline(
+    IAlertStore alerts,
+    ICooldownStore cooldowns,
+    TimeProvider? clock = null,
+    EnrichmentPipeline? enrichment = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
+    // Defaulted rather than required, so a test that is asking about cooldown or deduplication does not
+    // have to assemble an enrichment stage it has no opinion about. The container supplies the real one.
+    private readonly EnrichmentPipeline _enrichment = enrichment ?? EnrichmentPipeline.None;
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
 
@@ -90,7 +99,18 @@ public sealed class DetectionPipeline(IAlertStore alerts, ICooldownStore cooldow
                 continue;
             }
 
-            var alert = Build(rule, candidate, now);
+            // After cooldown and before the insert. After, so a suppressed candidate costs no lookups;
+            // before, so what was found is part of the row rather than a second write — and so a critical
+            // asset raises the severity that gets recorded rather than one that has to be corrected.
+            //
+            // The cost of being before the deduplicating insert is that a losing race enriches for
+            // nothing. Those are rare — a retry, a restart, two nodes — and the alternative is writing
+            // every alert twice.
+            var enriched = await _enrichment.EnrichAsync(
+                new EnrichmentRequest(rule.RuleId, rule.Name, rule.Severity, candidate.Subject, candidate.Sample),
+                ct);
+
+            var alert = Build(rule, candidate, now, enriched);
 
             // The unique fingerprint decides. A losing insert means another evaluation of this same window
             // already recorded it — a retry, a restart, or the other node.
@@ -119,7 +139,8 @@ public sealed class DetectionPipeline(IAlertStore alerts, ICooldownStore cooldow
         return new PipelineResult(decisions);
     }
 
-    private static Alert Build(RuleDefinition rule, DetectionCandidate candidate, DateTimeOffset now)
+    private static Alert Build(
+        RuleDefinition rule, DetectionCandidate candidate, DateTimeOffset now, EnrichedAlert enriched)
     {
         var subject = candidate.Subject;
 
@@ -132,7 +153,14 @@ public sealed class DetectionPipeline(IAlertStore alerts, ICooldownStore cooldow
             RuleId = rule.RuleId,
             RuleVersion = rule.Version,
             RuleName = rule.Name,
-            Severity = rule.Severity,
+
+            // What the rule said, unless an enrichment argued for more. It can only have been raised —
+            // see EnrichmentPipeline for why lowering is not offered.
+            Severity = enriched.Severity,
+
+            // Null rather than "{}" when nothing was found, so "no enrichment is registered" and "the
+            // enrichments found nothing about this subject" do not read identically in the console.
+            EnrichmentJson = enriched.Any ? JsonSerializer.Serialize(enriched.Facts, Json) : null,
 
             Subject = DetectionFingerprint.SubjectKey(subject),
             SubjectJson = JsonSerializer.Serialize(subject, Json),

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Sentinel.Application.Actions;
 using Sentinel.Application.Detection;
+using Sentinel.Application.Enrichment;
 using Sentinel.Domain.Alerts;
 using Sentinel.Domain.Connections;
 using Sentinel.Domain.Platform;
@@ -117,7 +118,7 @@ public sealed class EfCooldownStore(SentinelDbContext db, TimeProvider clock) : 
 /// else — another node, or this one before a restart — already owns the action.
 /// </summary>
 public sealed class EfActionExecutionStore(
-    SentinelDbContext db, ILogger<EfActionExecutionStore> logger) : IActionExecutionStore
+    SentinelDbContext db, ILogger<EfActionExecutionStore> logger) : IActionExecutionStore, IApprovalSweep
 {
     public async Task<bool> TryClaimAsync(ActionExecution execution, CancellationToken ct = default)
     {
@@ -152,6 +153,75 @@ public sealed class EfActionExecutionStore(
         db.ActionExecutions.Update(execution);
         await db.SaveChangesAsync(ct);
     }
+
+    public async Task<int> ExpireApprovalsAsync(DateTime asOf, CancellationToken ct = default)
+    {
+        // One statement rather than loading the rows: this runs on every tick on every node, and nothing
+        // is holding what it touches. The filter is the one the index covers.
+        var expired = await db.ActionExecutions
+            .Where(e => e.Status == ActionExecutionStatus.PendingApproval &&
+                        e.ApprovalExpiresAt != null &&
+                        e.ApprovalExpiresAt <= asOf)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(e => e.Status, ActionExecutionStatus.Expired)
+                .SetProperty(e => e.ErrorCode, "APPROVAL_EXPIRED")
+                .SetProperty(e => e.ErrorMessage, "Nobody approved it in time, so it was not carried out.")
+                .SetProperty(e => e.FinishedAt, asOf), ct);
+
+        if (expired > 0)
+            logger.LogWarning("{Count} held action(s) expired without a decision", expired);
+
+        return expired;
+    }
+}
+
+/// <summary>
+/// The asset inventory, read whole.
+///
+/// Cached for a short while because it is read on the path that records every alert and changes about
+/// once a week. Short enough that an operator who has just corrected an entry sees it take effect inside
+/// a minute, which is the interval at which somebody fixing a wrong criticality gives up and asks whether
+/// the feature works.
+/// </summary>
+public sealed class EfAssetLookup(SentinelDbContext db, TimeProvider clock) : IAssetLookup
+{
+    private static readonly TimeSpan Freshness = TimeSpan.FromSeconds(30);
+
+    // Static, so the cache is shared across the scoped instances the engine creates per tick rather than
+    // being discarded with each one — which would make it no cache at all.
+    private static IReadOnlyList<Asset> _cached = [];
+    private static DateTimeOffset _readAt = DateTimeOffset.MinValue;
+    private static readonly SemaphoreSlim Refreshing = new(1, 1);
+
+    public async Task<IReadOnlyList<Asset>> AllAsync(CancellationToken ct = default)
+    {
+        var now = clock.GetUtcNow();
+
+        if (now - _readAt < Freshness)
+            return _cached;
+
+        await Refreshing.WaitAsync(ct);
+
+        try
+        {
+            // Checked again inside the gate: several rules evaluating at once would otherwise all find it
+            // stale and all read the table.
+            if (clock.GetUtcNow() - _readAt < Freshness)
+                return _cached;
+
+            _cached = await db.Assets.AsNoTracking().ToListAsync(ct);
+            _readAt = clock.GetUtcNow();
+
+            return _cached;
+        }
+        finally
+        {
+            Refreshing.Release();
+        }
+    }
+
+    /// <summary>Drops the cache, so an edit in the console is visible on the next alert rather than in half a minute.</summary>
+    public static void Invalidate() => _readAt = DateTimeOffset.MinValue;
 }
 
 /// <summary>

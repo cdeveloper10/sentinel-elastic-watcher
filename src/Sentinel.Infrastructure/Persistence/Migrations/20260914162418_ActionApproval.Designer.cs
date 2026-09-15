@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Sentinel.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Sentinel.Infrastructure.Persistence;
 namespace Sentinel.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(SentinelDbContext))]
-    partial class SentinelDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260914162418_ActionApproval")]
+    partial class ActionApproval
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -185,9 +188,6 @@ namespace Sentinel.Infrastructure.Persistence.Migrations
                     b.Property<string>("Disposition")
                         .HasMaxLength(24)
                         .HasColumnType("character varying(24)");
-
-                    b.Property<string>("EnrichmentJson")
-                        .HasColumnType("text");
 
                     b.Property<long>("EventCount")
                         .HasColumnType("bigint");
@@ -389,64 +389,6 @@ namespace Sentinel.Infrastructure.Persistence.Migrations
                     b.HasIndex("ExpiresAt");
 
                     b.ToTable("action_rate_counters", (string)null);
-                });
-
-            modelBuilder.Entity("Sentinel.Domain.Platform.Asset", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Criticality")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<string>("Environment")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Identifier")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1024)
-                        .HasColumnType("character varying(1024)");
-
-                    b.Property<string>("Owner")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Identifier")
-                        .IsUnique();
-
-                    b.ToTable("assets", (string)null);
                 });
 
             modelBuilder.Entity("Sentinel.Domain.Platform.AuditEntry", b =>

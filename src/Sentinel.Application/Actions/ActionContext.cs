@@ -40,6 +40,17 @@ public sealed record ActionContext(
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// What the enrichments knew about the subject, read via <c>enrich.*</c> — already keyed
+    /// <c>&lt;enrichment&gt;.&lt;fact&gt;</c>, so <c>{{enrich.asset.owner}}</c>.
+    ///
+    /// This is the context a message could not carry before. "Block 10.5.5.5" says nothing an operator can
+    /// act on at two in the morning; "10.5.5.5 is dc01, critical, owned by Infrastructure" is the same
+    /// alert with the thing that decides what happens next attached to it.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Enrichment { get; init; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// What the actions before this one did, keyed <c>&lt;type&gt;.status</c> and <c>&lt;type&gt;.reason</c>
     /// and read as <c>{{actions.block_ip.status}}</c>.
     ///
@@ -94,8 +105,33 @@ public sealed record ActionContext(
             settings)
         {
             Sample = sample ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
-            Outcomes = outcomes ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            Outcomes = outcomes ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+
+            // Read off the alert rather than passed in, because it was stored on the alert precisely so
+            // that what the platform knew at the moment it decided is the thing every later reader sees —
+            // including an action approved an hour afterwards.
+            Enrichment = Stored(alert.EnrichmentJson)
         };
+
+    private static IReadOnlyDictionary<string, string> Stored(string? json)
+    {
+        var empty = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (string.IsNullOrWhiteSpace(json))
+            return empty;
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json)
+                   is { } read
+                ? new Dictionary<string, string>(read, StringComparer.OrdinalIgnoreCase)
+                : empty;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return empty;
+        }
+    }
 
     /// <summary>
     /// Resolves one template path. The whole vocabulary, enumerated: there is no expression evaluation and
@@ -121,6 +157,9 @@ public sealed record ActionContext(
 
         if (trimmed.StartsWith("evidence.", StringComparison.OrdinalIgnoreCase))
             return Evidence.TryGetValue(trimmed[9..], out value!) && value is not null;
+
+        if (trimmed.StartsWith("enrich.", StringComparison.OrdinalIgnoreCase))
+            return Enrichment.TryGetValue(trimmed[7..], out value!) && value is not null;
 
         if (trimmed.StartsWith("setting.", StringComparison.OrdinalIgnoreCase))
             return Settings.TryGetValue(trimmed[8..], out value!) && value is not null;
@@ -172,6 +211,7 @@ public sealed record ActionContext(
         .. Derived.Keys,
         .. Event.Keys.Select(k => $"event.{k}"),
         .. Sample.Keys.Select(k => $"sample.{k}"),
+        .. Enrichment.Keys.Select(k => $"enrich.{k}"),
         .. Outcomes.Keys.Select(k => $"actions.{k}"),
         .. Outcomes.Keys.Select(k => $"actions.{k}"),
         .. Evidence.Keys.Select(k => $"evidence.{k}"),

@@ -59,9 +59,10 @@ if (trustedProxies.Length > 0)
 
         foreach (var network in trustedProxies)
         {
-            // TryParse rather than the constructor: it also rejects a range whose host bits are set, which
-            // is the mistake an operator actually makes, and which would otherwise stop the pod on startup
-            // with a framework message that never names the setting it came from.
+            // TryParse rather than the constructor, which throws on a range whose host bits are set and
+            // would stop the pod during startup with a framework message that never names the setting it
+            // came from. TryParse takes that form and reads it as the range it means — "10.42.0.5/16"
+            // becomes 10.42.0.0/16 — so a near-miss is honoured rather than fatal.
             if (System.Net.IPNetwork.TryParse(network, out var range))
                 options.KnownIPNetworks.Add(range);
             else if (IPAddress.TryParse(network, out var proxy))
@@ -69,7 +70,7 @@ if (trustedProxies.Length > 0)
             else
                 throw new InvalidOperationException(
                     $"Hosting:TrustedProxies contains '{network}', which is neither an address nor a CIDR " +
-                    "range with its host bits cleared - write '10.42.0.0/16', not '10.42.0.5/16'.");
+                    "range — write '10.42.0.0/16' or '10.42.0.7'.");
         }
     });
 }
@@ -217,6 +218,7 @@ app.MapGet("/health/ready", async (SentinelDbContext db, CancellationToken ct) =
 app.MapAuth();
 app.MapUsers();
 app.MapConnections();
+app.MapAssets();
 app.MapRules();
 app.MapAlerts();
 app.MapOperations();

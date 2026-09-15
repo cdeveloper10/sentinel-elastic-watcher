@@ -34,9 +34,12 @@ public static class RuleVocabulary
     /// render a blank every time, on the one rule where somebody was relying on it.
     /// </summary>
     public static IReadOnlyList<string> ForAction(
-        RuleDefinition rule, IDetectionStrategyRegistry strategies, int actionIndex)
+        RuleDefinition rule,
+        IDetectionStrategyRegistry strategies,
+        int actionIndex,
+        IEnumerable<string>? enrichmentPaths = null)
     {
-        var paths = new List<string>(For(rule, strategies));
+        var paths = new List<string>(For(rule, strategies, enrichmentPaths));
 
         foreach (var preceding in rule.Actions.Take(actionIndex).Select(a => a.Type).Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -48,9 +51,25 @@ public static class RuleVocabulary
         return paths.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    public static IReadOnlyList<string> For(RuleDefinition rule, IDetectionStrategyRegistry strategies)
+    /// <param name="enrichmentPaths">
+    /// What the registered enrichments will attach, already prefixed — <c>enrich.asset.owner</c>.
+    ///
+    /// Passed in rather than discovered here, because which enrichments exist is a composition question
+    /// and this class deliberately knows nothing about the container. Absent means none are registered,
+    /// and a rule referring to one is then refused — which is right: a deployment without the asset
+    /// inventory would render those as blanks for ever.
+    /// </param>
+    public static IReadOnlyList<string> For(
+        RuleDefinition rule,
+        IDetectionStrategyRegistry strategies,
+        IEnumerable<string>? enrichmentPaths = null)
     {
         var paths = new List<string>(Always);
+
+        // Unlike sample.*, these are knowable in advance: every enrichment declares the facts it produces,
+        // so they are enumerated rather than seeded as a prefix.
+        if (enrichmentPaths is not null)
+            paths.AddRange(enrichmentPaths);
 
         // Every action that renders a message exposes it under this name, so it can be placed in whichever
         // field the rule's own gateway calls it.

@@ -331,7 +331,7 @@ function attachPlaceholderMenu(input, getOptions) {
 
   const family = (path) => {
     const prefix = path.split('.')[0];
-    return ['event', 'sample', 'evidence', 'alert', 'rule'].includes(prefix) ? prefix : 'value';
+    return ['event', 'sample', 'enrich', 'evidence', 'alert', 'rule'].includes(prefix) ? prefix : 'value';
   };
 
   // Closed first: the insertion dispatches an input event, and reopening the menu on top of a
@@ -419,8 +419,19 @@ function attachPlaceholderMenu(input, getOptions) {
   input.closest('.drawer')?.addEventListener('scroll', close, { passive: true });
 }
 
+/* How a verdict from /api/rules/quality is shown. Colour is carried by the same pill classes severities
+   use, so a rule doing harm reads the way a critical alert does — which is what it is. */
+const VERDICTS = {
+  HARMFUL:  ['sev-CRITICAL', 'harmful'],
+  TUNE:     ['sev-HIGH', 'tune it'],
+  SILENT:   ['sev-MEDIUM', 'never fired'],
+  HEALTHY:  ['st-RESOLVED', 'healthy'],
+  UNJUDGED: ['off', 'unjudged']
+};
+
 function rulesPage() {
   const rows = state.data.rules || [];
+  const quality = state.data.quality || [];
 
   const view = el(`
     <div>
@@ -435,10 +446,14 @@ function rulesPage() {
 
       <div class="card">
         <div class="scroller"><table>
-          <thead><tr><th>Rule</th><th>Severity</th><th>State</th><th>Last run</th><th>Alerts</th><th></th></tr></thead>
+          <thead><tr><th>Rule</th><th>Severity</th><th>Quality</th><th>State</th><th>Last run</th><th>Alerts</th><th></th></tr></thead>
           <tbody>
-            ${rows.length === 0 ? '<tr><td colspan="6" class="empty">No rules yet.</td></tr>' : ''}
-            ${rows.map(r => `
+            ${rows.length === 0 ? '<tr><td colspan="7" class="empty">No rules yet.</td></tr>' : ''}
+            ${rows.map(r => {
+              const q = quality.find(x => x.ruleId === r.id);
+              const [style, label] = VERDICTS[q?.verdict] || VERDICTS.UNJUDGED;
+
+              return `
               <tr>
                 <td><strong>${esc(r.name)}</strong>
                   <div class="muted" style="font-size:12.5px">${esc(r.description || '')}</div>
@@ -446,6 +461,11 @@ function rulesPage() {
                     ? `<div class="pill st-FAILED" style="margin-top:4px">failing x${r.consecutiveFailures}</div>
                        <div class="muted mono" style="font-size:12px">${esc(r.lastError || '')}</div>` : ''}</td>
                 <td>${pill('sev', r.severity)}</td>
+                <td class="nowrap">
+                  <span class="pill ${style}" title="${esc(q?.advice || '')}">${label}</span>
+                  ${q && q.judged > 0
+                    ? `<div class="muted" style="font-size:12px">${Math.round(q.falsePositiveRate * 100)}% false
+                       &middot; ${q.judged} judged</div>` : ''}</td>
                 <td><span class="pill ${r.enabled ? 'on' : 'off'}">${r.enabled ? 'armed' : 'draft'}</span>
                     <div class="muted" style="font-size:12px">v${r.currentVersion}</div></td>
                 <td class="nowrap muted">${when(r.lastRunAt)}</td>
@@ -458,7 +478,8 @@ function rulesPage() {
                   ${can('rules.enable') ? `<button class="btn small ${r.enabled ? 'danger' : 'primary'}"
                      data-arm="${r.id}" data-on="${r.enabled ? '0' : '1'}">${r.enabled ? 'Disarm' : 'Arm'}</button>` : ''}
                 </div></td>
-              </tr>`).join('')}
+              </tr>`;
+            }).join('')}
           </tbody>
         </table></div>
       </div>
@@ -649,7 +670,11 @@ async function openRule(detail, options = {}) {
   const readAction = a => ({
     type: a.type ?? a.Type ?? '',
     connection: a.connection ?? a.Connection ?? '',
-    settings: { ...(a.settings ?? a.Settings ?? {}) }
+    settings: { ...(a.settings ?? a.Settings ?? {}) },
+
+    // Absent on every version stored before gating existed, and false is the only reading that does not
+    // silently start holding an action somebody has been relying on.
+    requiresApproval: (a.requiresApproval ?? a.RequiresApproval) === true
   });
 
   // Everything the form edits, in one place. The drawer renders from this and writes back to it on every
@@ -1317,6 +1342,10 @@ async function openRule(detail, options = {}) {
         ...((catalogue.evidence || {})[draft.strategyType] || []).map(k => `evidence.${k}`),
         ...groupBy.map(f => `event.${f}`),
 
+        // What the registered enrichments will attach. Unlike sample.*, these are knowable in advance —
+        // each enrichment declares the facts it produces — so they are offered rather than guessed at.
+        ...(catalogue.enrich || []).flatMap(e => e.paths || []),
+
         // Fields of the log line itself. The API cannot enumerate these — which fields the one returned
         // event carries is not known until an alert is raised — but this form has already discovered the
         // real mapping, so it can offer them rather than leaving an author to guess at spelling.
@@ -1382,6 +1411,15 @@ async function openRule(detail, options = {}) {
             </div>
             ${schema?.isDisruptive
               ? '<div class="notice warn" style="margin-bottom:10px">This changes a live system. The never-block list and the rate caps apply.</div>' : ''}
+            <div class="field">
+              <label><input type="checkbox" data-approval="${index}" style="width:auto;margin-right:6px"
+                     ${action.requiresApproval ? 'checked' : ''}> Hold for approval before this runs</label>
+              <div class="hint">The rule still fires and the alert is still raised; this action waits for a
+                person instead of happening. Unanswered, it expires without being carried out. The actions
+                after it can read <span class="mono">{{actions.${esc(action.type)}.status}}</span>, so a
+                message can say that something is waiting rather than that it was done.</div></div>
+            ${schema?.isReversible === false && action.requiresApproval
+              ? '<div class="notice warn" style="margin-bottom:10px">This cannot be undone once it runs, which is the case approval is most worth having for.</div>' : ''}
             <div class="field"><label>Connection</label>
               <select data-conn="${index}">
                 ${usable.length === 0
@@ -1423,6 +1461,11 @@ async function openRule(detail, options = {}) {
 
       box.querySelectorAll('[data-conn]').forEach(input => input.addEventListener('change', () => {
         draft.actions[+input.dataset.conn].connection = input.value;
+      }));
+
+      box.querySelectorAll('[data-approval]').forEach(input => input.addEventListener('change', () => {
+        draft.actions[+input.dataset.approval].requiresApproval = input.checked;
+        drawActions();
       }));
 
       box.querySelectorAll('[data-setting]').forEach(input => {
@@ -1480,7 +1523,9 @@ async function openRule(detail, options = {}) {
 
       const first = (state.data.connections || []).find(c => c.type === schema.requiredConnectionType);
 
-      draft.actions.push({ type: schema.type, connection: first?.name || '', settings });
+      draft.actions.push({
+        type: schema.type, connection: first?.name || '', settings, requiresApproval: false
+      });
       drawActions();
     }));
 

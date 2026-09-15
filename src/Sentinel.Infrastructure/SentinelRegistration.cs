@@ -8,6 +8,7 @@ using Sentinel.Application.Actions;
 using Sentinel.Application.Audit;
 using Sentinel.Application.Engine;
 using Sentinel.Application.Detection;
+using Sentinel.Application.Enrichment;
 using Sentinel.Application.EventSources;
 using Sentinel.Application.Rules;
 using Sentinel.Application.Security;
@@ -97,6 +98,7 @@ public static class SentinelRegistration
         services.AddScoped<ICooldownStore, EfCooldownStore>();
         services.AddScoped<EfCooldownStore>();
         services.AddScoped<IActionExecutionStore, EfActionExecutionStore>();
+        services.AddScoped<IApprovalSweep, EfActionExecutionStore>();
         services.AddScoped<IActionRateStore, EfActionRateStore>();
         services.AddScoped<EfActionRateStore>();
         services.AddScoped<IConnectionLookup, EfConnectionLookup>();
@@ -105,6 +107,7 @@ public static class SentinelRegistration
         services.AddScoped<IRuleRuntimeSource, EfRuleRuntimeSource>();
         services.AddScoped<IAuditTrail, EfAuditTrail>();
         services.AddScoped<IEngineNodeStore, EfEngineNodeStore>();
+        services.AddScoped<IAssetLookup, EfAssetLookup>();
 
         services.AddScoped<RuleEvaluator>();
         services.AddScoped<RuleScheduler>();
@@ -149,6 +152,12 @@ public static class SentinelRegistration
         // Stateless for the same reason, and unable to act for the same structural one: it holds a source
         // and nothing else, so "a preview never executes an action" is a property of the type.
         services.AddSingleton<ConditionPreviewService>();
+
+        // Enrichments, gathered by the container the way strategies and actions are. A third is another
+        // line here and nothing else changes.
+        services.AddSingleton<IEnrichment, NetworkEnrichment>();
+        services.AddScoped<IEnrichment, AssetEnrichment>();
+        services.AddScoped<EnrichmentPipeline>();
 
         // Scoped, not singleton: it reads and writes through stores that hold a DbContext. Registering it
         // as a singleton would capture one context for the life of the process, which accumulates every

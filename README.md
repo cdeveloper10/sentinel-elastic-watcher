@@ -6,7 +6,7 @@ Watches logs in Elasticsearch, decides when a condition holds, and does somethin
 
 ## Where it stands
 
-The platform runs against real infrastructure. **650 tests pass, no warnings** — including an end-to-end
+The platform runs against real infrastructure. **716 tests pass, no warnings** — including an end-to-end
 suite that evaluates a rule stored in PostgreSQL against a live Elasticsearch cluster and writes the alert
 it produces.
 
@@ -15,7 +15,9 @@ it produces.
 | **1 — Source** | Connection model, Elasticsearch adapter, connectivity probe, index and field discovery, bounded query building | — |
 | **2 — Rules** | Rule and version model, two detection strategies, window planning, validation, condition builder, live preview, templates, dry run | — |
 | **3 — Detection** | Alert model, deduplication, cooldown, pipeline, scheduler, checkpoints, per-rule leases, engine loop | — |
-| **4 — Response** | Action contract and registry, dispatcher with retry and idempotency, three providers, per-rule payloads, safety rails | — |
+| **4 — Response** | Action contract and registry, dispatcher with retry and idempotency, three providers, per-rule payloads, safety rails, approval gate, reversal | — |
+| **Feedback** | Disposition on every closed alert, per-rule false-positive rate with a verdict | Cases |
+| **Context** | Enrichment stage, address classification, asset inventory, severity raised by criticality | Identity, threat intel, geography |
 | **Platform** | PostgreSQL schema and migrations, all stores, audit trail, cookie authentication, RBAC, write endpoints, the console, container images and Kubernetes manifests | — |
 
 ### The two processes
@@ -42,7 +44,16 @@ services have been built — the abstractions have not yet been tested by a seco
 /api/rules/{id}/checkpoint` and the kill switch have no button in the console. The first two are a UI
 gap; the kill switch is worse than that — `Safety:ActionsEnabled` is configuration, so stopping a rule
 that is blocking the wrong addresses currently means editing a file and restarting the engine. For a
-platform that acts on its own, that is the control most worth reaching in a hurry.
+platform that acts on its own, that is the control most worth reaching in a hurry. (Gating an action for
+approval and undoing one that already ran both exist; this is the blunt instrument that does not.)
+
+**No cases.** Alerts are standalone: twelve about one host in ten minutes are twelve rows, not one
+investigation with an assignee and a timeline. That is the gap where an alerting tool becomes a
+detection-and-response platform, and it is the next thing worth building.
+
+**Enrichment reaches an inventory and nothing else.** Asset criticality and owner are looked up; identity
+context, address reputation and geography are not. `IEnrichment` is the seam for them and two
+implementations already use it, so a third is a class and one line — but none has been written.
 
 **The console has no automated tests.** Every C# capability ships with one and the suite gates every
 change; the browser code does not, because there is no JavaScript test harness in the repository. What
@@ -368,6 +379,48 @@ Actions page like any other. It has to be: "no block happened" and "a block was 
 address is on the never-block list" look identical otherwise, and the second is a decision somebody needs
 to be able to find afterwards.
 
+### Held until somebody says yes
+
+Any action on any rule can be gated. The rule still fires and the alert is still raised; that action is
+claimed and parked as `PENDING_APPROVAL` instead of happening, and there is **no path from a held action
+to an executed one that does not pass through a person** — the dispatcher does not call the provider at
+all on that branch.
+
+Claimed rather than merely noted, so the gate cannot become a second way to run the action: a node
+reaching the same alert afterwards finds the key already owned. And the actions after it can read
+`{{actions.block_ip.status}}`, so the message that goes out says what is true —
+
+```
+CRITICAL: 37 slow responses from Payments in 5m.
+Block of Payments is PENDING_APPROVAL. Held for approval until 17:32Z. It has not been carried out.
+```
+
+Unanswered, it expires. `Safety:ApprovalWindowSeconds` decides how long, floored at a minute, and the
+engine sweeps on every tick. That direction is deliberate: an approval that waits indefinitely is not a
+gate but a queue nobody empties, and saying yes the next morning blocks an address over a situation that
+ended hours ago.
+
+Approving rebuilds the request from the alert and the **rule version that produced it** rather than from
+anything stored when it parked — so it sends exactly what would have been sent an hour ago, even if the
+rule has been edited twice since.
+
+### Taking one back
+
+`block_ip` and `block_user` implement `IReversibleAction`; `sms` does not, because a message that reached
+somebody's phone cannot be unsent. A platform that blocks addresses on its own and cannot unblock one is
+not automation with a safety rail — it is a decision nobody can revisit, and the occasions an automated
+block is wrong are exactly the occasions somebody needs it lifted within the minute. Expiry through the
+gateway is not the same thing: that is a promise made by a system this one does not control, on a schedule
+nobody here can shorten.
+
+A reversal is its own act with its own idempotency key, and it is recorded **on** the original rather than
+replacing it. What the platform did at three in the morning happened; a record the person undoing it at
+nine could rewrite would answer "which addresses did we block last night" with a lie. The undo endpoint is
+configured like any other: `{"paths": {"block_ip.reverse": "/firewall/v2/allow"}}`.
+
+The Actions page says how many automated changes are still in force, because that is the question people
+ask during an incident.
+
 ### Checked when it is saved, not when it fires
 
 Every action binding is validated against the provider that will run it and the connection it will run
@@ -470,7 +523,7 @@ Neither is ever committed.
 dotnet test Sentinel.slnx
 ```
 
-650 tests and no external dependencies. Elasticsearch and the security API are recorded HTTP handlers and
+716 tests and no external dependencies. Elasticsearch and the security API are recorded HTTP handlers and
 the database is SQLite, so the suite needs neither a cluster nor a server. The exceptions are the tests
 that could not prove anything against a fake: TLS verification runs a real handshake against a real
 self-signed certificate on a loopback listener, and the outbound address guard opens real sockets —
@@ -491,6 +544,74 @@ prove it could would be exactly the accident the safety rails exist to prevent.
 `AcceptanceTests` runs the brief's end-to-end scenario with every layer real except those two edges.
 `CompositionTests` builds the container with `ValidateOnBuild` and `ValidateScopes`, which is what catches
 a singleton holding a scoped `DbContext` — a bug that otherwise appears only under load, weeks later.
+
+## What the estate knows about the subject
+
+Between detecting and responding there is now a step that asks what the platform already knows about the
+thing an alert is about. It existed because every decision after detection — how serious this is, whether
+to block — was being made from the grouped fields and one sample event alone, and "block 10.5.5.5" is a
+different decision depending on whether that address is a laptop or a domain controller.
+
+Enrichments run after cooldown and deduplication and **before the alert is written**, so what they found
+is part of the record rather than something attached afterwards, and a suppressed candidate costs no
+lookups. They reach the actions as `{{enrich.asset.owner}}`.
+
+Two ship, so the abstraction is exercised by more than one implementation:
+
+| | |
+|---|---|
+| `network` | Classifies the address — private, public, loopback, link-local — and says whether the never-act list protects it. Needs no configuration, so every deployment gets something. |
+| `asset` | What the inventory says: name, criticality, owner, environment. An exact entry beats a range containing it, and the narrowest range wins. |
+
+The fact that earns `network` its place is `protected`. The never-act list is consulted by the dispatcher
+at the moment it refuses to block, which is *after* the message has gone out saying an address was
+blocked. Known here, a rule's own message can say the address is protected and will not be blocked.
+
+**Severity is raised, never lowered.** A critical asset argues for a floor; the pipeline takes the higher
+of the two. The asymmetry is the point: an enrichment able to lower severity would let a stale inventory
+entry quietly downgrade a real incident, and nothing about the alert would look wrong afterwards. Only the
+top two criticalities raise anything — a floor at "normal" would raise every alert in the platform, which
+is the same as raising none.
+
+```
+[CRITICAL] ApplicationName.keyword=AiServices — AI services gateway, owned by Platform team (production)
+[LOW]      ApplicationName.keyword=Payments — , owned by  ()
+```
+
+Two alerts from one rule that says `LOW`. The estate knows something about the first subject and nothing
+about the second, and neither message invents anything.
+
+**An enrichment that fails cannot cost the alert.** These reach inventories and third-party services —
+things that are down at exactly the moment an incident is happening. A failure is bounded at five seconds,
+logged, recorded as `enrich.<name>.error`, and the alert proceeds. Recorded rather than only logged,
+because the person reading the alert is not reading the engine's log and "owner: " with no explanation is
+indistinguishable from an asset nobody has entered.
+
+The inventory is deliberately small: an identifier, a kind, a name, a criticality, an owner. Not a CMDB
+and not trying to be one — what the platform needs before it acts is whether this matters and who to ask.
+
+## Whether a rule is worth keeping
+
+Closing an alert asks what it turned out to be, and the field is required — one people may skip is one
+that is empty on most rows, and a rate computed from a quarter of the alerts is worse than none because
+it looks authoritative.
+
+Four values, not two. `FALSE_POSITIVE` is the only one counted against the rule: a backup job that trips
+a detection every Sunday is `BENIGN` — the rule was right and the activity was authorised, and what wants
+fixing is an exception rather than the logic. Counting those as failures condemns rules that are working.
+
+```
+FALSE_POSITIVE / judged alerts      > 20% — worth an hour
+                                    > 50% — costing more attention than it saves
+```
+
+The denominator is alerts somebody has judged, not all of them: otherwise a rule looks better the more of
+its alerts are ignored. And a verdict needs five judged alerts before it is given at all, because one
+wrong alert out of one is not a 100% failure rate — it is one alert, and reporting it as the former is how
+a good rule gets deleted in its first week.
+
+An armed rule that has never fired is called out separately. Silence reads as peace and is usually a
+broken log source, and nobody goes looking for a rule that is not complaining.
 
 ## Guarantees that are constraints, not code
 

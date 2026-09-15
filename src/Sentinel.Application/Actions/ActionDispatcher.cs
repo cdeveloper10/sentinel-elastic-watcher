@@ -31,6 +31,24 @@ public interface IActionExecutionStore
     Task UpdateAsync(ActionExecution execution, CancellationToken ct = default);
 }
 
+/// <summary>
+/// Closes out held actions whose approval window has passed.
+///
+/// Kept off <see cref="IActionExecutionStore"/> deliberately. That interface is what the dispatcher needs
+/// in order to run an action, and it is small so that a test can stand in for it in four lines; this is
+/// housekeeping the engine performs and nothing in a dispatch path ever calls. Putting it there would have
+/// obliged seven test doubles to implement a method none of them has an opinion about.
+///
+/// Swept rather than evaluated when somebody opens the page, because an action nobody looked at is
+/// precisely the one this exists for: it has to reach a terminal state on its own, or "waiting for
+/// approval" becomes a list that grows for ever and means nothing.
+/// </summary>
+public interface IApprovalSweep
+{
+    /// <summary>Expires everything past its window as of this moment, and answers how many.</summary>
+    Task<int> ExpireApprovalsAsync(DateTime asOf, CancellationToken ct = default);
+}
+
 /// <summary>Looks up the connection an action binding names.</summary>
 public interface IConnectionLookup
 {
@@ -42,6 +60,10 @@ public sealed record DispatchResult(IReadOnlyList<ActionExecution> Executions)
     public int Succeeded => Executions.Count(e => e.Status == ActionExecutionStatus.Success);
     public int Failed => Executions.Count(e => e.Status is ActionExecutionStatus.Failed or ActionExecutionStatus.DeadLetter);
     public int Skipped => Executions.Count(e => e.Status == ActionExecutionStatus.Skipped);
+
+    /// <summary>Held for a person to decide. Counted apart from skipped: nobody has refused these yet.</summary>
+    public int AwaitingApproval =>
+        Executions.Count(e => e.Status == ActionExecutionStatus.PendingApproval);
 }
 
 /// <summary>
@@ -182,8 +204,48 @@ public sealed class ActionDispatcher(
             return execution;
         }
 
+        // Parked rather than performed, and only after the claim — so the gate cannot become a second way
+        // to run the action. A node reaching this alert later finds the key already owned.
+        //
+        // Nothing here calls the provider, which is what makes the gate real: there is no path from a
+        // pending approval to an executed action that does not pass through a person.
+        if (binding.RequiresApproval)
+        {
+            execution.Status = ActionExecutionStatus.PendingApproval;
+            execution.ApprovalExpiresAt = now.UtcDateTime.Add(safety.ApprovalWindow);
+            execution.ErrorCode = "AWAITING_APPROVAL";
+            execution.ErrorMessage =
+                $"Held for approval until {execution.ApprovalExpiresAt:u}. It has not been carried out.";
+
+            await executions.UpdateAsync(execution, ct);
+
+            logger.LogInformation(
+                "{Action} on {Target} for rule {RuleId} is awaiting approval",
+                binding.Type, execution.Target, rule.RuleId);
+
+            return execution;
+        }
+
         return await AttemptAsync(execution, provider, context, connection, ct);
     }
+
+    /// <summary>
+    /// Carries out an action that was held for approval, once somebody has approved it.
+    ///
+    /// The same attempt path as any other action — the same retry, the same backoff, the same record — so
+    /// an approved action is not a second implementation of dispatching that drifts from the first. What
+    /// is different is only when it happens and that a person decided it.
+    ///
+    /// The claim was taken when it parked, so this does not claim again: the right to perform this action
+    /// has been held since the alert was raised.
+    /// </summary>
+    public Task<ActionExecution> ExecuteApprovedAsync(
+        ActionExecution execution,
+        IActionProvider provider,
+        ActionContext context,
+        Connection connection,
+        CancellationToken ct = default) =>
+        AttemptAsync(execution, provider, context, connection, ct);
 
     private async Task<ActionExecution> AttemptAsync(
         ActionExecution execution,
