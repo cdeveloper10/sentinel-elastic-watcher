@@ -219,6 +219,7 @@ app.MapAuth();
 app.MapUsers();
 app.MapConnections();
 app.MapAssets();
+app.MapCases();
 app.MapRules();
 app.MapAlerts();
 app.MapOperations();

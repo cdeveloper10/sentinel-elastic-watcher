@@ -6,7 +6,7 @@ Watches logs in Elasticsearch, decides when a condition holds, and does somethin
 
 ## Where it stands
 
-The platform runs against real infrastructure. **716 tests pass, no warnings** — including an end-to-end
+The platform runs against real infrastructure. **729 tests pass, no warnings** — including an end-to-end
 suite that evaluates a rule stored in PostgreSQL against a live Elasticsearch cluster and writes the alert
 it produces.
 
@@ -16,7 +16,8 @@ it produces.
 | **2 — Rules** | Rule and version model, two detection strategies, window planning, validation, condition builder, live preview, templates, dry run | — |
 | **3 — Detection** | Alert model, deduplication, cooldown, pipeline, scheduler, checkpoints, per-rule leases, engine loop | — |
 | **4 — Response** | Action contract and registry, dispatcher with retry and idempotency, three providers, per-rule payloads, safety rails, approval gate, reversal | — |
-| **Feedback** | Disposition on every closed alert, per-rule false-positive rate with a verdict | Cases |
+| **Feedback** | Disposition on every closed alert, per-rule false-positive rate with a verdict | — |
+| **Investigation** | Cases correlated by asset, timeline, assignment, closing that resolves the alerts | Linking to a ticketing system |
 | **Context** | Enrichment stage, address classification, asset inventory, severity raised by criticality | Identity, threat intel, geography |
 | **Platform** | PostgreSQL schema and migrations, all stores, audit trail, cookie authentication, RBAC, write endpoints, the console, container images and Kubernetes manifests | — |
 
@@ -46,10 +47,6 @@ gap; the kill switch is worse than that — `Safety:ActionsEnabled` is configura
 that is blocking the wrong addresses currently means editing a file and restarting the engine. For a
 platform that acts on its own, that is the control most worth reaching in a hurry. (Gating an action for
 approval and undoing one that already ran both exist; this is the blunt instrument that does not.)
-
-**No cases.** Alerts are standalone: twelve about one host in ten minutes are twelve rows, not one
-investigation with an assignee and a timeline. That is the gap where an alerting tool becomes a
-detection-and-response platform, and it is the next thing worth building.
 
 **Enrichment reaches an inventory and nothing else.** Asset criticality and owner are looked up; identity
 context, address reputation and geography are not. `IEnrichment` is the seam for them and two
@@ -523,7 +520,7 @@ Neither is ever committed.
 dotnet test Sentinel.slnx
 ```
 
-716 tests and no external dependencies. Elasticsearch and the security API are recorded HTTP handlers and
+729 tests and no external dependencies. Elasticsearch and the security API are recorded HTTP handlers and
 the database is SQLite, so the suite needs neither a cluster nor a server. The exceptions are the tests
 that could not prove anything against a fake: TLS verification runs a real handshake against a real
 self-signed certificate on a loopback listener, and the outbound address guard opens real sockets —
@@ -589,6 +586,48 @@ indistinguishable from an asset nobody has entered.
 
 The inventory is deliberately small: an identifier, a kind, a name, a criticality, an owner. Not a CMDB
 and not trying to be one — what the platform needs before it acts is whether this matters and who to ask.
+
+## One investigation, not twelve alerts
+
+The unit an analyst works in is not an alert. Twelve alerts about one host in ten minutes are one question,
+and answering it twelve times — closing twelve rows — is the toil that makes people stop reading alerts.
+
+Cases were built after disposition and enrichment, and the order is the point. Without a disposition there
+is nothing to close a case *with*; without enrichment two alerts about one machine look like two unrelated
+subjects. Grouping before either exists only tidies the noise.
+
+**Correlation is one sentence: the asset if the enrichment found one, otherwise the subject.** Anything
+cleverer — scoring, graphs, transitive association — produces cases whose membership nobody can explain,
+and a case an analyst cannot explain is one they stop trusting. The asset comes first because it is what
+makes grouping work across rules that see one machine differently, which is visible in the output:
+
+```
+CASE-…-A13D06  AI services gateway              CRITICAL  2 alerts   ← two rules, one asset, one case
+CASE-…-905158  ApplicationName.keyword=Payments MEDIUM    1 alert    ← no asset entry, so
+CASE-…-B8836A  ApiName.keyword=Payments         MEDIUM    1 alert       two rules look like two subjects
+```
+
+Both halves are the same two rules firing on the same two hosts. The inventory has an entry for one of
+them and not the other, and that is the whole difference.
+
+**At most one open case per entity, as a database constraint.** The third guarantee in the platform that
+is an index rather than logic: `cases.OpenKey` is the entity while open and null once closed, and nulls do
+not collide. Two engine nodes raising alerts about one host in the same instant would otherwise both find
+nothing and both open a case, with an analyst reading half the story in each.
+
+**A case ends when somebody ends it.** There was a time window here — an alert hours later starting a
+fresh case — and writing the test removed it: it contradicted the constraint beside it. Both can hold only
+if the platform closes the old case, and concluding an investigation is a judgement. A case that has been
+collecting alerts all week is a true statement about the queue not being worked, and splitting it
+automatically would hide that.
+
+**Closing a case closes its alerts**, with the disposition recorded once. That is the payback for having
+cases at all.
+
+The timeline is ordered by identity rather than timestamp. Rules evaluate concurrently and each captures
+its own clock reading before touching the database, so the alert that opened a case can carry a timestamp
+a microsecond later than one that joined immediately after — and the timeline then claims the alert was
+added before the case existed.
 
 ## Whether a rule is worth keeping
 

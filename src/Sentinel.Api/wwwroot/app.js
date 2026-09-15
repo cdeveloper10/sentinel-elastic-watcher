@@ -102,6 +102,7 @@ const ROUTES = [
   { id: 'connections', label: 'Connections', needs: 'connections.read' },
   { id: 'rules',       label: 'Rules',       needs: 'rules.read' },
   { id: 'assets',      label: 'Assets',      needs: 'connections.read' },
+  { id: 'cases',       label: 'Cases',       needs: 'alerts.read' },
   { id: 'alerts',      label: 'Alerts',      needs: 'alerts.read' },
   { id: 'executions',  label: 'Actions',     needs: 'actions.read' },
   { id: 'audit',       label: 'Audit',       needs: 'audit.read' },
@@ -136,6 +137,8 @@ async function load(route) {
     ]);
   } else if (route === 'assets') {
     await get('/api/assets', 'assets');
+  } else if (route === 'cases') {
+    await get('/api/cases?status=open&take=100', 'cases');
   } else if (route === 'alerts') {
     await get('/api/alerts?take=100', 'alerts');
   } else if (route === 'executions') {
@@ -243,7 +246,7 @@ function shell() {
 
   const page = ({
     dashboard: dashboardPage, connections: connectionsPage, rules: rulesPage, assets: assetsPage,
-    alerts: alertsPage, executions: executionsPage, audit: auditPage, users: usersPage
+    cases: casesPage, alerts: alertsPage, executions: executionsPage, audit: auditPage, users: usersPage
   })[state.route];
 
   if (page) main.appendChild(page());

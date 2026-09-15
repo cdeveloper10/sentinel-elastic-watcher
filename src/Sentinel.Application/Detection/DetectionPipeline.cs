@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Sentinel.Application.Cases;
 using Sentinel.Application.Enrichment;
 using Sentinel.Application.EventSources;
 using Sentinel.Application.Rules;
@@ -63,13 +64,15 @@ public sealed class DetectionPipeline(
     IAlertStore alerts,
     ICooldownStore cooldowns,
     TimeProvider? clock = null,
-    EnrichmentPipeline? enrichment = null)
+    EnrichmentPipeline? enrichment = null,
+    CaseAssembler? cases = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
-    // Defaulted rather than required, so a test that is asking about cooldown or deduplication does not
-    // have to assemble an enrichment stage it has no opinion about. The container supplies the real one.
+    // Both defaulted rather than required, so a test asking about cooldown or deduplication does not have
+    // to assemble stages it has no opinion about. The container supplies the real ones.
     private readonly EnrichmentPipeline _enrichment = enrichment ?? EnrichmentPipeline.None;
+    private readonly CaseAssembler? _cases = cases;
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
 
@@ -123,6 +126,12 @@ public sealed class DetectionPipeline(
                     "An alert with this fingerprint already exists."));
                 continue;
             }
+
+            // After the insert, because it needs the row's identity — and because an alert that lost the
+            // deduplicating race must not open an investigation into an incident already being
+            // investigated.
+            if (_cases is not null)
+                alert.Case = await _cases.PlaceAsync(alert, enriched.Facts, ct);
 
             // Recorded only after the alert is committed, so a failed insert cannot leave a subject in
             // cooldown for an alert that does not exist.

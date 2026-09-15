@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Sentinel.Application.Actions;
 using Sentinel.Application.Audit;
+using Sentinel.Application.Cases;
 using Sentinel.Application.Engine;
 using Sentinel.Application.Detection;
 using Sentinel.Application.Enrichment;
@@ -51,6 +52,8 @@ public static class SentinelRegistration
                               ?? new ActionSafetySettings());
 
         services.AddSingleton(configuration.GetSection("Retry").Get<RetrySettings>() ?? new RetrySettings());
+
+        services.AddSingleton(configuration.GetSection("Cases").Get<CaseSettings>() ?? new CaseSettings());
 
         services.AddSingleton(configuration.GetSection("Engine").Get<EngineSettings>() ?? new EngineSettings());
         services.TryAddSingleton(TimeProvider.System);
@@ -108,6 +111,8 @@ public static class SentinelRegistration
         services.AddScoped<IAuditTrail, EfAuditTrail>();
         services.AddScoped<IEngineNodeStore, EfEngineNodeStore>();
         services.AddScoped<IAssetLookup, EfAssetLookup>();
+        services.AddScoped<ICaseStore, EfCaseStore>();
+        services.AddScoped<CaseAssembler>();
 
         services.AddScoped<RuleEvaluator>();
         services.AddScoped<RuleScheduler>();

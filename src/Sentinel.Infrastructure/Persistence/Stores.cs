@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Sentinel.Application.Actions;
+using Sentinel.Application.Cases;
 using Sentinel.Application.Detection;
 using Sentinel.Application.Enrichment;
 using Sentinel.Domain.Alerts;
@@ -172,6 +173,57 @@ public sealed class EfActionExecutionStore(
             logger.LogWarning("{Count} held action(s) expired without a decision", expired);
 
         return expired;
+    }
+}
+
+/// <summary>
+/// Cases, with "at most one open case per entity" enforced by the unique index on <c>OpenKey</c>.
+///
+/// The third guarantee in this platform that is a constraint rather than logic, and for the same reason as
+/// the other two: two engine nodes raising alerts about one host in the same instant would both find
+/// nothing open, both insert, and one investigation would become two — with the analyst reading half the
+/// story in each.
+/// </summary>
+public sealed class EfCaseStore(SentinelDbContext db, ILogger<EfCaseStore> logger) : ICaseStore
+{
+    public Task<Case?> OpenForAsync(string entityKey, CancellationToken ct = default) =>
+        db.Cases.FirstOrDefaultAsync(c => c.OpenKey == entityKey, ct);
+
+    public async Task<bool> TryOpenAsync(Case newCase, CancellationToken ct = default)
+    {
+        db.Cases.Add(newCase);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            db.Entry(newCase).State = EntityState.Detached;
+
+            // Provider-agnostic, the way the alert store is: ask whether the row that would have collided
+            // is there now. If it is, this was a race; if it is not, the write failed for another reason
+            // and must not be swallowed as one.
+            var opened = await db.Cases.AsNoTracking()
+                .AnyAsync(c => c.OpenKey == newCase.OpenKey, ct);
+
+            if (!opened)
+                throw;
+
+            logger.LogDebug("A case for {Entity} was opened by another node", newCase.EntityKey);
+
+            return false;
+        }
+    }
+
+    public async Task AttachAsync(Case existing, Alert alert, CaseEvent entry, CancellationToken ct = default)
+    {
+        alert.CaseId = existing.Id;
+        entry.CaseId = existing.Id;
+
+        db.CaseEvents.Add(entry);
+        await db.SaveChangesAsync(ct);
     }
 }
 

@@ -682,3 +682,254 @@ function openAsset(existing) {
 
   render();
 }
+
+/* ==========================================================================
+   Investigations.
+
+   The unit an analyst works in is not an alert. Twelve alerts about one host
+   in ten minutes are one question, and this page is where it gets answered
+   once instead of twelve times.
+   ========================================================================== */
+
+const CASE_STATUSES = { OPEN: 'off', INVESTIGATING: 'st-RUNNING', CLOSED: 'st-RESOLVED' };
+
+function casesPage() {
+  const rows = state.data.cases || [];
+  const mine = rows.filter(c => c.assignedTo && c.assignedTo === state.me?.displayName);
+  const unclaimed = rows.filter(c => c.status === 'OPEN' && !c.assignedTo);
+
+  const view = el(`
+    <div>
+      <div class="page-head">
+        <div><h1>Cases</h1>
+          <p>Alerts about the same thing, gathered into one investigation. Closing a case closes every
+             alert still open in it, with the conclusion you record — so a conclusion is reached once
+             rather than per alert.</p></div>
+        <div class="row">
+          ${['open', 'INVESTIGATING', 'CLOSED', ''].map(s =>
+            `<button class="btn small" data-filter="${s}">${s ? (s === 'open' ? 'Open' : s[0] + s.slice(1).toLowerCase()) : 'All'}</button>`).join('')}
+        </div>
+      </div>
+
+      ${unclaimed.length ? `<div class="notice warn">
+        <strong>${unclaimed.length}</strong> case${unclaimed.length === 1 ? '' : 's'} nobody has picked
+        up.</div>` : ''}
+
+      ${mine.length ? `<div class="notice info">
+        <strong>${mine.length}</strong> assigned to you.</div>` : ''}
+
+      <div class="card">
+        <div class="scroller"><table>
+          <thead><tr><th>Case</th><th>About</th><th>Severity</th><th>Alerts</th><th>Status</th>
+            <th>Assigned</th><th>Last alert</th></tr></thead>
+          <tbody>
+            ${rows.length === 0
+              ? '<tr><td colspan="7" class="empty">No cases. They open themselves when an alert is raised.</td></tr>'
+              : ''}
+            ${rows.map(c => `
+              <tr class="clickable" data-open="${c.id}">
+                <td class="mono">${esc(c.caseId)}</td>
+                <td><strong>${esc(c.title)}</strong></td>
+                <td>${pill('sev', c.severity)}</td>
+                <td class="nowrap">${c.alertCount}</td>
+                <td><span class="pill ${CASE_STATUSES[c.status] || 'off'}">${esc(c.status.toLowerCase())}</span>
+                  ${c.disposition ? `<div class="muted" style="font-size:12px">${esc(c.disposition.toLowerCase().replace('_', ' '))}</div>` : ''}</td>
+                <td>${esc(c.assignedTo || '')}</td>
+                <td class="nowrap muted">${when(c.lastAlertAt)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table></div>
+      </div>
+    </div>`);
+
+  view.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => guard(async () => {
+    const status = b.dataset.filter;
+    state.data.cases = await api(`/api/cases?take=100${status ? `&status=${status}` : ''}`);
+  })));
+
+  view.querySelectorAll('[data-open]').forEach(row => row.addEventListener('click', () => guard(async () => {
+    openCase(await api(`/api/cases/${row.dataset.open}`));
+  })));
+
+  return view;
+}
+
+function openCase(detail) {
+  const c = detail.case;
+  const alerts = detail.alerts || [];
+  const timeline = detail.timeline || [];
+  const executions = detail.executions || [];
+
+  const inEffect = executions.filter(e => e.status === 'SUCCESS' && !e.reversedAt);
+  const waiting = executions.filter(e => e.status === 'PENDING_APPROVAL');
+
+  state.drawer = () => {
+    const view = el(`
+      <div class="drawer-back">
+        <div class="drawer">
+          <div class="drawer-head">
+            <div><h1>${esc(c.title)}</h1>
+              <p class="muted">${pill('sev', c.severity)}
+                <span class="pill ${CASE_STATUSES[c.status] || 'off'}">${esc(c.status.toLowerCase())}</span>
+                <span class="mono" style="margin-left:8px">${esc(c.caseId)}</span></p></div>
+            <button class="btn" id="close">Close</button>
+          </div>
+
+          <div class="tiles">
+            <div class="tile"><div class="n">${c.alertCount}</div><div class="k">Alerts</div></div>
+            <div class="tile ${inEffect.length ? 'warn' : ''}"><div class="n">${inEffect.length}</div>
+              <div class="k">Changes in force</div></div>
+            <div class="tile ${waiting.length ? 'warn' : ''}"><div class="n">${waiting.length}</div>
+              <div class="k">Awaiting approval</div></div>
+          </div>
+
+          <div class="card" style="margin-top:14px">
+            <h3>Alerts in this case</h3>
+            <div class="scroller"><table>
+              <thead><tr><th>When</th><th>Rule</th><th>Severity</th><th>Subject</th><th>Status</th></tr></thead>
+              <tbody>${alerts.map(a => `
+                <tr>
+                  <td class="nowrap muted">${when(a.detectedAt)}</td>
+                  <td>${esc(a.ruleName)} <span class="muted">v${a.ruleVersion}</span></td>
+                  <td>${pill('sev', a.severity)}</td>
+                  <td class="mono">${esc(a.subject)}</td>
+                  <td>${pill('st', a.status)}</td>
+                </tr>`).join('')}</tbody>
+            </table></div>
+          </div>
+
+          ${executions.length ? `
+            <div class="card">
+              <h3>What the platform did</h3>
+              <p class="muted" style="font-size:13px;margin:0 0 10px">Across every alert in this case —
+                 during an incident "what have we already changed" is one question, not twelve.</p>
+              <div class="scroller"><table>
+                <thead><tr><th>Action</th><th>Target</th><th>Status</th><th>Detail</th></tr></thead>
+                <tbody>${executions.map(e => `
+                  <tr>
+                    <td class="nowrap">${esc(e.actionType)}</td>
+                    <td class="mono">${esc(e.target || '')}</td>
+                    <td>${pill('st', e.status)}
+                      ${e.reversedAt ? '<div class="muted" style="font-size:12px">reversed</div>' : ''}</td>
+                    <td class="muted" style="font-size:12.5px">${esc(e.errorMessage || '')}</td>
+                  </tr>`).join('')}</tbody>
+              </table></div>
+            </div>` : ''}
+
+          <div class="card">
+            <h3>Timeline</h3>
+            <div class="sample-doc">
+              ${timeline.map(e => `
+                <div class="sample-line" style="grid-template-columns:minmax(120px,auto) 1fr">
+                  <span class="p">${when(e.at)}${e.author ? ' · ' + esc(e.author) : ''}</span>
+                  <span>${esc(e.text)}</span>
+                </div>`).join('')}
+            </div>
+          </div>
+
+          ${c.status !== 'CLOSED' && can('alerts.acknowledge') ? `
+            <div class="card">
+              <h3>Work it</h3>
+              <div class="grid2">
+                <div class="field"><label>Assigned to</label>
+                  <input id="assignee" value="${esc(c.assignedTo || '')}"
+                         placeholder="Leave blank to put it back in the queue">
+                  <div class="hint">Assigning it moves it out of the untouched queue.</div></div>
+                <div class="field"><label>&nbsp;</label>
+                  <button class="btn" type="button" id="assign">Assign</button></div>
+              </div>
+
+              <div class="field"><label>Add a note</label>
+                <input id="note" placeholder="What you found. It goes on the timeline.">
+                <div class="hint">The timeline is the case's real content — a status says where an
+                  investigation ended up, the notes say how it got there.</div></div>
+              <button class="btn" type="button" id="addnote">Add note</button>
+            </div>` : ''}
+
+          ${c.status !== 'CLOSED' && can('alerts.resolve') ? `
+            <div class="card">
+              <h3>Close the investigation</h3>
+              <div class="hint" style="margin-bottom:10px">What you record here is applied to every alert
+                in this case that is still open — which is the point of having the case.</div>
+
+              <div class="field"><label>It was</label>
+                <div class="chips" id="dispositions">
+                  ${DISPOSITIONS.map(([value, label, why]) => `
+                    <button class="btn small" type="button" data-disposition="${value}"
+                            title="${esc(why)}">${esc(label)}</button>`).join('')}
+                </div>
+                <div class="hint" id="dispositionhint">&nbsp;</div></div>
+
+              <div class="field"><label>Closing note</label>
+                <input id="closenote" placeholder="Optional."></div>
+
+              <button class="btn primary" type="button" id="closecase" disabled>Close case</button>
+            </div>`
+            : c.status === 'CLOSED' ? `
+            <div class="card">
+              <h3>Concluded</h3>
+              <dl class="kv">
+                <dt>Closed</dt><dd>${exact(c.closedAt)} by ${esc(c.closedBy || '')}</dd>
+                <dt>Turned out to be</dt><dd>${esc(DISPOSITIONS.find(d => d[0] === c.disposition)?.[1] || c.disposition || '')}</dd>
+                ${c.closingNote ? `<dt>Note</dt><dd>${esc(c.closingNote)}</dd>` : ''}
+              </dl>
+            </div>` : ''}
+        </div>
+      </div>`);
+
+    const close = () => { state.drawer = null; render(); };
+    view.querySelector('#close').addEventListener('click', close);
+    view.addEventListener('click', e => { if (e.target === view) close(); });
+
+    view.querySelector('#assign')?.addEventListener('click', () => guard(async () => {
+      await api(`/api/cases/${c.id}/assign`, {
+        method: 'POST', body: { to: view.querySelector('#assignee').value || null }
+      });
+      close(); notify('Assigned.'); await load('cases');
+    }));
+
+    view.querySelector('#addnote')?.addEventListener('click', () => guard(async () => {
+      const text = view.querySelector('#note').value;
+      if (!text.trim()) { notify('A note needs something in it.', 'err'); return; }
+
+      await api(`/api/cases/${c.id}/note`, { method: 'POST', body: { text } });
+      close(); notify('Added to the timeline.'); await load('cases');
+    }));
+
+    let disposition = null;
+
+    view.querySelectorAll('[data-disposition]').forEach(button => button.addEventListener('click', () => {
+      disposition = button.dataset.disposition;
+
+      view.querySelectorAll('[data-disposition]').forEach(other =>
+        other.classList.toggle('primary', other === button));
+
+      view.querySelector('#dispositionhint').textContent =
+        DISPOSITIONS.find(d => d[0] === disposition)?.[2] ?? '';
+
+      view.querySelector('#closecase').disabled = false;
+    }));
+
+    view.querySelector('#closecase')?.addEventListener('click', () => {
+      const open = alerts.filter(a => a.status !== 'RESOLVED').length;
+
+      // Said out loud, because closing a case resolves alerts somebody else may be looking at.
+      if (open > 0 && !confirm(
+        `Close this case?\n\n${open} alert(s) still open will be resolved as ${disposition}.`)) return;
+
+      guard(async () => {
+        const result = await api(`/api/cases/${c.id}/close`, {
+          method: 'POST', body: { disposition, note: view.querySelector('#closenote').value || null }
+        });
+
+        close();
+        notify(`Closed. ${result.alertsResolved} alert(s) resolved with it.`);
+        await load('cases');
+      });
+    });
+
+    return view;
+  };
+
+  render();
+}

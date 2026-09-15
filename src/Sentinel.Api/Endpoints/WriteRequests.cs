@@ -101,6 +101,12 @@ public sealed record ResolveAlertRequest(string? Note, string? Disposition);
 /// <summary>Declining a held action. The reason is the useful half — "no" alone teaches nobody anything.</summary>
 public sealed record RejectActionRequest(string? Reason);
 
+public sealed record AssignCaseRequest(string? To);
+
+public sealed record CaseNoteRequest(string? Text);
+
+public sealed record CloseCaseRequest(string? Disposition, string? Note);
+
 public sealed record AssetRequest(
     string Identifier,
     string Kind,

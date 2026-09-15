@@ -46,6 +46,8 @@ public class SentinelDbContext(DbContextOptions<SentinelDbContext> options)
     public DbSet<RuleCheckpoint> Checkpoints => Set<RuleCheckpoint>();
     public DbSet<EngineNode> EngineNodes => Set<EngineNode>();
     public DbSet<Asset> Assets => Set<Asset>();
+    public DbSet<Case> Cases => Set<Case>();
+    public DbSet<CaseEvent> CaseEvents => Set<CaseEvent>();
     public DbSet<RuleLease> RuleLeases => Set<RuleLease>();
     public DbSet<Alert> Alerts => Set<Alert>();
     public DbSet<ActionExecution> ActionExecutions => Set<ActionExecution>();
@@ -232,6 +234,54 @@ public class SentinelDbContext(DbContextOptions<SentinelDbContext> options)
             entity.ToTable("rule_checkpoints");
             entity.HasKey(e => e.RuleId);
             entity.Property(e => e.LastError).HasMaxLength(2048);
+        });
+
+        model.Entity<Case>(entity =>
+        {
+            entity.ToTable("cases");
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => e.CaseId).IsUnique();
+
+            // At most one open case per entity, as a constraint rather than a check. Nulls do not collide
+            // in PostgreSQL or SQLite, so a closed case falls out of it without a filtered index that
+            // would have to be written differently per provider.
+            entity.HasIndex(e => e.OpenKey).IsUnique();
+
+            entity.HasIndex(e => new { e.Status, e.LastAlertAt });
+
+            entity.Property(e => e.CaseId).HasMaxLength(48).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.EntityKey).HasMaxLength(320).IsRequired();
+            entity.Property(e => e.EntityLabel).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.OpenKey).HasMaxLength(320);
+            entity.Property(e => e.Status).HasMaxLength(24).IsRequired();
+            entity.Property(e => e.Severity).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.AssignedTo).HasMaxLength(128);
+            entity.Property(e => e.ClosedBy).HasMaxLength(128);
+            entity.Property(e => e.Disposition).HasMaxLength(24);
+            entity.Property(e => e.ClosingNote).HasMaxLength(2048);
+        });
+
+        model.Entity<CaseEvent>(entity =>
+        {
+            entity.ToTable("case_events");
+            entity.HasKey(e => e.Id);
+
+            // Ordered by identity when read, because concurrent rules capture their timestamps before
+            // doing the work — see CaseEndpoints for the reasoning.
+            entity.HasIndex(e => new { e.CaseId, e.Id });
+
+            entity.Property(e => e.Kind).HasMaxLength(24).IsRequired();
+            entity.Property(e => e.Author).HasMaxLength(128);
+            entity.Property(e => e.Text).HasMaxLength(4096).IsRequired();
+
+            // Both ends named, for the reason RuleVersion documents: an unnamed relationship beside a
+            // discovered navigation invents a shadow column the migration faithfully creates.
+            entity.HasOne(e => e.Case)
+                .WithMany(c => c.Events)
+                .HasForeignKey(e => e.CaseId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         model.Entity<Asset>(entity =>

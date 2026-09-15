@@ -75,6 +75,16 @@ public class Alert
     public string? EnrichmentJson { get; set; }
 
     /// <summary>
+    /// The investigation this alert is part of, where grouping is on and found one.
+    ///
+    /// Nullable because an alert belonging to no case is still a complete alert: grouping can be switched
+    /// off, and a failure to file one must never become a failure to record it.
+    /// </summary>
+    public int? CaseId { get; set; }
+
+    public Case? Case { get; set; }
+
+    /// <summary>
     /// Whether the alert deserved to exist. One of <see cref="AlertDisposition"/>, recorded when it is
     /// resolved.
     ///
